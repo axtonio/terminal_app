@@ -38,7 +38,7 @@ RUN_MODE: Literal["script", "module", "jupyter", "bin"]
 
 try:
     __main__.__file__
-    if "-m" in sys.orig_argv:
+    if "-m" in sys.orig_argv and sys.orig_argv[2] != "ipykernel_launcher":
         RUN_MODE = "module"
     elif sys.argv[0].endswith(".py"):
         RUN_MODE = "script"
