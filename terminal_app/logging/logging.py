@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-__all__ = ["register_logger", "LoggingMeta", "RootLogging", "TerminalAppHandler", "DEFAULT_FORMATTER", "DEFAULT_STREAM"]
+__all__ = [
+    "register_logger",
+    "LoggingMeta",
+    "RootLogging",
+    "TerminalAppHandler",
+    "DEFAULT_FORMATTER",
+    "DEFAULT_STREAM",
+]
 
 import os
 import sys
@@ -24,14 +31,14 @@ class TerminalAppHandler(FileHandler):
     def emit(self, record: logging.LogRecord) -> None:
         stream = self.stream
         line = self.get_line(self.baseFilename)
-        mesage = record.msg
+        message = record.msg
 
         record.msg = line
         self.stream = sys.stdout  # type: ignore
         super().emit(record)
 
         self.stream = stream
-        record.msg = mesage
+        record.msg = message
         super().emit(record)
         return None
 
