@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 __all__ = [
-    "register_logger",
     "LoggingMeta",
     "RootLogging",
-    "TerminalAppHandler",
-    "DEFAULT_FORMATTER",
     "DEFAULT_STREAM",
+    "register_logger",
+    "DEFAULT_FORMATTER",
+    "TerminalAppHandler",
+    "TERMINAL_APP_LOGGER",
 ]
 
 import os
@@ -67,7 +68,7 @@ class TerminalAppHandler(FileHandler):
 class TerminalAppLogger(Logger):
 
     def _log(self, *args, **kwargs) -> None:
-        if PROJECT_CONFIG.TERMINAL_APP_LOGGING:
+        if PROJECT_CONFIG.TERMINAL_APP_LOGGER:
             return super()._log(*args, **kwargs)
 
 
@@ -222,3 +223,4 @@ class RootLogging(metaclass=LoggingMeta):
 
 
 TERMINAL_APP_LOGGER = register_logger()
+TERMINAL_APP_LOGGER.info("\n" + str(PROJECT_CONFIG))

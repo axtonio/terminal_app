@@ -1,16 +1,6 @@
 from __future__ import annotations
 
-__all__ = [
-    "OS",
-    "_BASE_DIR",
-    "_WORK_DIR",
-    "SSH_DIR",
-    "MEDIA_DIR",
-    "DATA_DIR",
-    "RUN_MODE",
-    "PROJECT_CONFIG",
-    "source",
-]
+__all__ = ["source", "PROJECT_CONFIG"]
 
 
 import __main__
@@ -27,27 +17,26 @@ from dotenv import load_dotenv
 
 
 from tabulate import tabulate
-from pytest_is_running import is_running
+# from pytest_is_running import is_running
 from pydantic import BaseModel, model_validator, Field
 
 
-OS = platform.system().lower()
-RUN_MODE: Literal["script", "module", "jupyter", "bin"]
+_RUN_MODE: Literal["script", "module", "jupyter", "bin"]
 
 try:
     __main__.__file__
     if "-m" in sys.orig_argv and sys.orig_argv[2] != "ipykernel_launcher":
-        RUN_MODE = "module"
+        _RUN_MODE = "module"
     elif sys.argv[0].endswith(".py"):
-        RUN_MODE = "script"
+        _RUN_MODE = "script"
 
     else:
-        RUN_MODE = "bin"
+        _RUN_MODE = "bin"
 except:
-    RUN_MODE = "jupyter"
+    _RUN_MODE = "jupyter"
 
 
-match RUN_MODE:
+match _RUN_MODE:
     case "script":
         _BASE_DIR = _WORK_DIR = Path(os.path.dirname(__main__.__file__))
     case "module":
@@ -100,16 +89,16 @@ class ProjectConfig(BaseModel):
     PHOTO_DIR: Path = MEDIA_DIR / "photo"
 
     INIT_FOLDERS: bool = False
-    TERMINAL_APP_LOGGING: bool = False
+    TERMINAL_APP_LOGGER: bool = False
     DESCRIPTION: str = Field(init=False, exclude=True)
 
     @property
     def OS(self) -> str:
-        return OS
+        return platform.system().lower()
 
     @property
     def RUN_MODE(self) -> str:
-        return RUN_MODE
+        return _RUN_MODE
 
     @property
     def CONFIG_DIR(self) -> Path:
@@ -126,11 +115,11 @@ class ProjectConfig(BaseModel):
 
         ProjectConfig.check_env_file(CONFIG_FILE)
 
-        desc = f"# Terminal App\n- OS: {OS}\n- CONFIG: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {RUN_MODE}\n{_show_env_info(CONFIG_FILE)}"
+        desc = f"# Terminal App\n- OS: {{}}\n- CONFIG: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {{}}\n{_show_env_info(CONFIG_FILE)}"
 
         data = source(CONFIG_FILE)
         data["INIT_FOLDERS"] = data["INIT_FOLDERS"].lower()
-        data["TERMINAL_APP_LOGGING"] = data["TERMINAL_APP_LOGGING"].lower()
+        data["TERMINAL_APP_LOGGER"] = data["TERMINAL_APP_LOGGER"].lower()
         data["DESCRIPTION"] = desc
 
         assert (
@@ -169,7 +158,7 @@ class ProjectConfig(BaseModel):
                                 os.mkdir(new_path)
 
         self.DESCRIPTION = self.DESCRIPTION.format(
-            self.CONFIG_DIR, self.BASE_DIR, self.WORK_DIR
+            self.OS, self.CONFIG_DIR, self.BASE_DIR, self.WORK_DIR, self.RUN_MODE
         )
 
         another = ""
@@ -268,6 +257,3 @@ def source(env_files: str | list[str] | Path | list[Path]) -> dict[str, str]:
 
 
 PROJECT_CONFIG = ProjectConfig()
-DATA_DIR = PROJECT_CONFIG.DATA_DIR
-SSH_DIR = PROJECT_CONFIG.SSH_DIR
-MEDIA_DIR = PROJECT_CONFIG.MEDIA_DIR
