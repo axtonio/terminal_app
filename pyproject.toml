@@ -6,9 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "terminal_app"
 description = 'Library for terminal application'
 readme = "README.md"
-authors = [
-	{ name = "Antonio Rodrigues", email = "antonio.projects.studio@gmail.com" },
-]
+authors = [{ name = "Antonio Rodrigues", email = "axtonio.code@gmail.com" }]
 keywords = ["terminal_app", "mipt"]
 dependencies = [
 	"python-dotenv~=1.0.1",
@@ -23,7 +21,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.urls]
-GitHub = "https://github.com/antonio-projects-studio/terminal_app"
+GitHub = "https://github.com/axtonio/terminal_app"
 
 [tool.setuptools.packages.find]
 where = ["."]

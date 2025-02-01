@@ -73,6 +73,7 @@ def register_logger(
     level: logging._Level = logging.DEBUG,
     terminal_app_handler: bool = False,
     without_handlers: bool = False,
+    remove: bool = False,
 ) -> Logger:
     pass
 
@@ -84,6 +85,7 @@ def register_logger(
     library: bool = False,
     level: logging._Level = logging.DEBUG,
     without_handlers: bool = False,
+    remove: bool = False,
 ) -> Logger:
     pass
 
@@ -95,6 +97,7 @@ def register_logger(
     level: logging._Level = logging.DEBUG,
     terminal_app_handler: bool = False,
     without_handlers: bool = False,
+    remove: bool = False,
 ) -> Logger:
 
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -113,6 +116,14 @@ def register_logger(
     else:
         if name is not None:
             naming = f"{suffix}.{name}"
+            if remove:
+                if naming in logging.Logger.manager.loggerDict.keys():
+                    logger = logging.getLogger(name)
+                    for handler in logger.handlers:
+                        logger.removeHandler(handler)
+
+                    logging.Logger.manager.loggerDict.pop(naming)
+
             assert (
                 naming not in logging.Logger.manager.loggerDict.keys()
             ), "The same name of the loggers"
