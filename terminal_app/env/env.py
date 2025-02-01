@@ -85,21 +85,22 @@ CONFIG_FILE = _BASE_DIR / _CONFIG_NAME
 class ProjectConfig(BaseModel):
     BASE_DIR: Path = Field(default=_BASE_DIR, init=False, exclude=True)
     WORK_DIR: Path = Field(default=_WORK_DIR, init=False, exclude=True)
-    CONFIGS_DIR: Path = _BASE_DIR / "configs"
+    CONFIGS_DIR: Path = Path("configs")
     CONFIG_FOLDERS: list = ["development", "production", "test"]
     SOURCE_FOLDER: str = "development"
-    LOGGING_DIR: Path = _BASE_DIR / "logging"
+    LOGGING_DIR: Path = Path("logging")
     LOGGING_SUFFIX: str = "terminal_app"
     LOGGING_FILE_MODE: Literal["w", "a"] = "w"
-    CERTIFICATES_DIR: Path = _BASE_DIR / "certificates"
+    CERTIFICATES_DIR: Path = Path("certificates")
     SSH_DIR: Path = CERTIFICATES_DIR / "ssh"
-    DATA_DIR: Path = _BASE_DIR / "data"
+    DATA_DIR: Path = Path("data")
     MEDIA_DIR: Path = DATA_DIR / "media"
     DOCUMENT_DIR: Path = MEDIA_DIR / "document"
     VIDEO_DIR: Path = MEDIA_DIR / "video"
     PHOTO_DIR: Path = MEDIA_DIR / "photo"
 
     INIT_FOLDERS: bool = False
+    TERMINAL_APP_LOGGING: bool = False
     DESCRIPTION: str = Field(init=False, exclude=True)
 
     @property
@@ -129,6 +130,7 @@ class ProjectConfig(BaseModel):
 
         data = source(CONFIG_FILE)
         data["INIT_FOLDERS"] = data["INIT_FOLDERS"].lower()
+        data["TERMINAL_APP_LOGGING"] = data["TERMINAL_APP_LOGGING"].lower()
         data["DESCRIPTION"] = desc
 
         assert (
@@ -149,6 +151,11 @@ class ProjectConfig(BaseModel):
 
     @model_validator(mode="after")
     def check_init_folders(self):
+        for name, path in self:
+            if isinstance(path, Path):
+                if not path.is_absolute():
+                    setattr(self, name, self.BASE_DIR / path.as_posix())
+
         if self.INIT_FOLDERS:
             for name, path in self:
                 if isinstance(path, Path):

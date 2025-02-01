@@ -12,10 +12,10 @@ __all__ = [
 import os
 import sys
 import logging
-from typing import Any, overload
-from logging import Logger, FileHandler
 from pathlib import Path
 from inspect import getfile
+from typing import Any, overload
+from logging import Logger, FileHandler
 
 from terminal_app.env import PROJECT_CONFIG
 
@@ -64,6 +64,13 @@ class TerminalAppHandler(FileHandler):
             return ""
 
 
+class TerminalAppLogger(Logger):
+
+    def _log(self, *args, **kwargs) -> None:
+        if PROJECT_CONFIG.TERMINAL_APP_LOGGING:
+            return super()._log(*args, **kwargs)
+
+
 @overload
 def register_logger(
     path: Path | str,
@@ -90,6 +97,11 @@ def register_logger(
     pass
 
 
+@overload
+def register_logger() -> TerminalAppLogger:
+    pass
+
+
 def register_logger(
     path: Path | str | None = None,
     name: str | None = None,
@@ -109,7 +121,7 @@ def register_logger(
     name = name if name is not None else file_path.stem if path is not None else None
 
     if name in logging.Logger.manager.loggerDict.keys() or library:
-        print(f"Change {name} logger")
+        TERMINAL_APP_LOGGER.info(f"Change {name} logger")
         logger = logging.getLogger(name)
         for handler in logger.handlers:
             logger.removeHandler(handler)
@@ -129,7 +141,7 @@ def register_logger(
             ), "The same name of the loggers"
             logger = logging.getLogger(naming)
         else:
-            logger = logging.getLogger(suffix)
+            logger = TerminalAppLogger(suffix, level)
 
     if not without_handlers:
 
@@ -207,3 +219,6 @@ class LoggingMeta(type):
 
 class RootLogging(metaclass=LoggingMeta):
     LOGGING = False
+
+
+TERMINAL_APP_LOGGER = register_logger()
