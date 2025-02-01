@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ["source", "PROJECT_CONFIG"]
+__all__ = ["source", "SourceEnv", "PROJECT_CONFIG"]
 
 
 import __main__
@@ -8,15 +8,13 @@ import os
 import sys
 import json
 import platform
-
 from typing import Literal, Any
-
 
 from pathlib import Path
 from dotenv import load_dotenv
 
-
 from tabulate import tabulate
+
 # from pytest_is_running import is_running
 from pydantic import BaseModel, model_validator, Field
 
@@ -200,7 +198,19 @@ def _show_env_info(env_file_path: Path) -> str:
     return tabulate(rows, headers=columns, tablefmt="psql")
 
 
-def source(env_files: str | list[str] | Path | list[Path]) -> dict[str, str]:
+class SourceEnv(dict):
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return super().__getitem__(key)
+        except KeyError as ex:
+            new_ex = KeyError(
+                f"Key '{key}' not found in the configuration environment. Configuration directory: {PROJECT_CONFIG.CONFIG_DIR.as_posix()}"
+            )
+            raise new_ex from ex
+
+
+def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
     data: dict[str, str] = {}
     assert (
         env_files != _CONFIG_NAME
@@ -253,7 +263,7 @@ def source(env_files: str | list[str] | Path | list[Path]) -> dict[str, str]:
             _source(path)
             load_variables(path)
 
-    return data
+    return SourceEnv(data)
 
 
 PROJECT_CONFIG = ProjectConfig()
