@@ -19,10 +19,8 @@ import sys
 import json
 import platform
 
-from typing import Literal, Any, TYPE_CHECKING
+from typing import Literal, Any
 
-if TYPE_CHECKING:
-    from typing import Self
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -56,11 +54,10 @@ match RUN_MODE:
         _WORK_DIR = Path(os.path.dirname(__main__.__file__))
         _BASE_DIR = _WORK_DIR.parent
     case "bin":
-        _WORK_DIR = Path(os.getcwd())
-        _BASE_DIR = _WORK_DIR.parent
+        _BASE_DIR = _WORK_DIR = Path(os.getcwd())
 
-        if is_running():
-            _BASE_DIR = Path(os.getcwd()) / "tests"
+        # if is_running():
+        # _BASE_DIR = Path(os.getcwd()) / "tests"
     case "jupyter":
         _BASE_DIR = _WORK_DIR = Path(os.getcwd())
 
@@ -70,8 +67,19 @@ if (tmp := os.getenv("BASE_DIR")) is not None:
 if (tmp := os.getenv("WORK_DIR")) is not None:
     _WORK_DIR = Path(tmp)
 
-CONFIG_NAME = ".terminal_app.env"
-CONFIG_FILE = _BASE_DIR / CONFIG_NAME
+_CONFIG_NAME = ".terminal_app.env"
+_TMP_BASE_DIR = _BASE_DIR
+CONFIG_FILE = _TMP_BASE_DIR / _CONFIG_NAME
+
+while not CONFIG_FILE.exists() and _TMP_BASE_DIR.parent != _TMP_BASE_DIR:
+    _TMP_BASE_DIR = _TMP_BASE_DIR.parent
+    CONFIG_FILE = _TMP_BASE_DIR / _CONFIG_NAME
+
+
+if CONFIG_FILE.exists():
+    _BASE_DIR = _TMP_BASE_DIR
+
+CONFIG_FILE = _BASE_DIR / _CONFIG_NAME
 
 
 class ProjectConfig(BaseModel):
@@ -140,7 +148,7 @@ class ProjectConfig(BaseModel):
                     )
 
     @model_validator(mode="after")
-    def check_init_folders(self) -> Self:
+    def check_init_folders(self):
         if self.INIT_FOLDERS:
             for name, path in self:
                 if isinstance(path, Path):
@@ -199,8 +207,8 @@ def _show_env_info(env_file_path: Path) -> str:
 def source(env_files: str | list[str] | Path | list[Path]) -> dict[str, str]:
     data: dict[str, str] = {}
     assert (
-        env_files != CONFIG_NAME
-    ), f"The env file cannot be assigned the name  {CONFIG_NAME}"
+        env_files != _CONFIG_NAME
+    ), f"The env file cannot be assigned the name  {_CONFIG_NAME}"
 
     def _get_path(env_file: str) -> Path:
         config_path = PROJECT_CONFIG.CONFIG_DIR
@@ -253,7 +261,6 @@ def source(env_files: str | list[str] | Path | list[Path]) -> dict[str, str]:
 
 
 PROJECT_CONFIG = ProjectConfig()
-print(PROJECT_CONFIG)
 DATA_DIR = PROJECT_CONFIG.DATA_DIR
 SSH_DIR = PROJECT_CONFIG.SSH_DIR
 MEDIA_DIR = PROJECT_CONFIG.MEDIA_DIR
