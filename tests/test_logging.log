@@ -1,0 +1,6 @@
+2025-03-07 11:16:45,503 INFO terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 5
+2025-03-07 11:16:45,503 ERROR terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 6
+2025-03-07 11:18:04,795 INFO terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 8
+2025-03-07 11:18:04,796 ERROR terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 9
+2025-03-07 11:18:05,655 INFO terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 11
+2025-03-07 11:18:05,655 ERROR terminal_app.test /home/antonio/Projects/StartUp/terminal_app/tests/logging/test.log, line 12

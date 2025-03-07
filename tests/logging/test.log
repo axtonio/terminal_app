@@ -1,2 +1,12 @@
-2025-01-28 18:16:27,319 INFO terminal_app.test A
-2025-01-28 18:16:27,321 ERROR terminal_app.test B
+STARTUP 1
+2025-03-07 11:16:35,883 INFO terminal_app.test A
+2025-03-07 11:16:35,884 ERROR terminal_app.test B
+STARTUP 2
+2025-03-07 11:16:45,503 INFO terminal_app.test A
+2025-03-07 11:16:45,503 ERROR terminal_app.test B
+STARTUP 3
+2025-03-07 11:18:04,795 INFO terminal_app.test A
+2025-03-07 11:18:04,796 ERROR terminal_app.test B
+STARTUP 4
+2025-03-07 11:18:05,655 INFO terminal_app.test A
+2025-03-07 11:18:05,655 ERROR terminal_app.test B

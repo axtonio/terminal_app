@@ -11,12 +11,13 @@ __all__ = [
 ]
 
 import os
+import io
 import sys
 import logging
 from pathlib import Path
 from inspect import getfile
-from typing import Any, overload
 from logging import Logger, FileHandler
+from typing import Any, overload, Literal
 
 from terminal_app.env import PROJECT_CONFIG
 
@@ -29,13 +30,25 @@ DEFAULT_STREAM.setFormatter(DEFAULT_FORMATTER)
 
 class TerminalAppHandler(FileHandler):
 
+    def __init__(
+        self,
+        terminal_app_stream: io.TextIOWrapper | None,
+        filename: str | os.PathLike[str],
+        mode: str = "a",
+        encoding: str | None = None,
+        delay: bool = False,
+        errors: str | None = None,
+    ) -> None:
+        super().__init__(filename, mode, encoding, delay, errors)
+        self.terminal_app_stream: io.TextIOWrapper = terminal_app_stream if terminal_app_stream is not None else sys.stdout  # type: ignore
+
     def emit(self, record: logging.LogRecord) -> None:
         stream = self.stream
         line = self.get_line(self.baseFilename)
         message = record.msg
 
         record.msg = line
-        self.stream = sys.stdout  # type: ignore
+        self.stream = self.terminal_app_stream
         super().emit(record)
 
         self.stream = stream
@@ -79,9 +92,23 @@ def register_logger(
     name: str | None = None,
     library: bool = False,
     level: logging._Level = logging.DEBUG,
-    terminal_app_handler: bool = False,
     without_handlers: bool = False,
-    remove: bool = False,
+    if_exist: Literal["error", "clear", "return"] = "error",
+) -> Logger:
+    pass
+
+
+@overload
+def register_logger(
+    path: Path | str,
+    *,
+    name: str | None = None,
+    library: bool = False,
+    level: logging._Level = logging.DEBUG,
+    terminal_app_handler: Literal[True],
+    terminal_app_stream: io.TextIOWrapper | None = None,
+    without_handlers: bool = False,
+    if_exist: Literal["error", "clear", "return"] = "error",
 ) -> Logger:
     pass
 
@@ -93,7 +120,7 @@ def register_logger(
     library: bool = False,
     level: logging._Level = logging.DEBUG,
     without_handlers: bool = False,
-    remove: bool = False,
+    if_exist: Literal["error", "clear", "return"] = "error",
 ) -> Logger:
     pass
 
@@ -109,8 +136,9 @@ def register_logger(
     library: bool = False,
     level: logging._Level = logging.DEBUG,
     terminal_app_handler: bool = False,
+    terminal_app_stream: io.TextIOWrapper | None = None,
     without_handlers: bool = False,
-    remove: bool = False,
+    if_exist: Literal["error", "clear", "return"] = "error",
 ) -> Logger:
 
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -129,13 +157,15 @@ def register_logger(
     else:
         if name is not None:
             naming = f"{suffix}.{name}"
-            if remove:
-                if naming in logging.Logger.manager.loggerDict.keys():
-                    logger = logging.getLogger(name)
+            if naming in logging.Logger.manager.loggerDict.keys():
+                if if_exist == "clear":
+                    logger = logging.getLogger(naming)
                     for handler in logger.handlers:
                         logger.removeHandler(handler)
 
                     logging.Logger.manager.loggerDict.pop(naming)
+                if if_exist == "return":
+                    return logging.getLogger(naming)
 
             assert (
                 naming not in logging.Logger.manager.loggerDict.keys()
@@ -153,30 +183,34 @@ def register_logger(
                 )
             else:
                 file_handler = TerminalAppHandler(
-                    file_path.as_posix(), mode=PROJECT_CONFIG.LOGGING_FILE_MODE
+                    terminal_app_stream,
+                    file_path.as_posix(),
+                    mode=PROJECT_CONFIG.LOGGING_FILE_MODE,
                 )
 
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
 
-            with open(file_path, f"{PROJECT_CONFIG.LOGGING_FILE_MODE}+") as f:
-                f.seek(0)
-                lines = f.readlines()
-                lines.reverse()
+            if PROJECT_CONFIG.LOGGING_FILE_MODE.lower() != "w":
 
-                count = 1
-                message = "STARTUP {}\n"
-                for line in lines:
-                    if line.startswith("STARTUP"):
-                        try:
-                            count = int(line[-2]) + 1
-                            break
-                        except Exception as ex:
-                            print(ex)
-                            continue
+                with open(file_path, f"{PROJECT_CONFIG.LOGGING_FILE_MODE}+") as f:
+                    f.seek(0)
+                    lines = f.readlines()
+                    lines.reverse()
 
-                f.write(message.format(count))
+                    count = 1
+                    message = "STARTUP {}\n"
+                    for line in lines:
+                        if line.startswith("STARTUP"):
+                            try:
+                                count = int(line[-2]) + 1
+                                break
+                            except Exception as ex:
+                                print(ex)
+                                continue
+
+                    f.write(message.format(count))
 
         else:
             logger.addHandler(DEFAULT_STREAM)
