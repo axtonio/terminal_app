@@ -8,6 +8,7 @@ __all__ = [
     "DEFAULT_FORMATTER",
     "TerminalAppHandler",
     "TERMINAL_APP_LOGGER",
+    "getTerminalAppLogger",
 ]
 
 import os
@@ -254,6 +255,10 @@ class LoggingMeta(type):
 
 class RootLogging(metaclass=LoggingMeta):
     LOGGING = False
+
+
+def getTerminalAppLogger(name: str) -> Logger:
+    return logging.getLogger(f"{PROJECT_CONFIG.LOGGING_SUFFIX}.{name}")
 
 
 TERMINAL_APP_LOGGER = register_logger()
