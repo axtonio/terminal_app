@@ -160,9 +160,12 @@ class ProjectConfig(BaseModel):
         )
 
         another = ""
-        for env_file in self.CONFIG_DIR.iterdir():
-            another += f"\n# {env_file.stem.replace('_', ' ').strip('.').title()}\n"
-            another += _show_env_info(env_file)
+        try:
+            for env_file in self.CONFIG_DIR.iterdir():
+                another += f"\n# {env_file.stem.replace('_', ' ').strip('.').title()}\n"
+                another += _show_env_info(env_file)
+        except Exception:
+            pass
 
         self.DESCRIPTION += another
 
