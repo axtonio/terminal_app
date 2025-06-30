@@ -2,7 +2,6 @@ from __future__ import annotations
 
 __all__ = ["source", "SourceEnv", "PROJECT_CONFIG"]
 
-
 import __main__
 import os
 import sys
@@ -14,8 +13,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from tabulate import tabulate
-
-# from pytest_is_running import is_running
+from omegaconf import OmegaConf
+from hydra import initialize_config_dir, compose
 from pydantic import BaseModel, model_validator, Field
 
 
@@ -27,12 +26,10 @@ try:
         _RUN_MODE = "module"
     elif sys.argv[0].endswith(".py"):
         _RUN_MODE = "script"
-
     else:
         _RUN_MODE = "bin"
-except:
+except Exception:
     _RUN_MODE = "jupyter"
-
 
 match _RUN_MODE:
     case "script":
@@ -42,9 +39,6 @@ match _RUN_MODE:
         _BASE_DIR = _WORK_DIR.parent
     case "bin":
         _BASE_DIR = _WORK_DIR = Path(os.getcwd())
-
-        # if is_running():
-        # _BASE_DIR = Path(os.getcwd()) / "tests"
     case "jupyter":
         _BASE_DIR = _WORK_DIR = Path(os.getcwd())
 
@@ -54,14 +48,13 @@ if (tmp := os.getenv("BASE_DIR")) is not None:
 if (tmp := os.getenv("WORK_DIR")) is not None:
     _WORK_DIR = Path(tmp)
 
-_CONFIG_NAME = ".terminal_app.env"
+_CONFIG_NAME = ".terminal_app.yaml"
 _TMP_BASE_DIR = _BASE_DIR
 CONFIG_FILE = _TMP_BASE_DIR / _CONFIG_NAME
 
 while not CONFIG_FILE.exists() and _TMP_BASE_DIR.parent != _TMP_BASE_DIR:
     _TMP_BASE_DIR = _TMP_BASE_DIR.parent
     CONFIG_FILE = _TMP_BASE_DIR / _CONFIG_NAME
-
 
 if CONFIG_FILE.exists():
     _BASE_DIR = _TMP_BASE_DIR
@@ -80,7 +73,13 @@ class ProjectConfig(BaseModel):
     LOGGING_FILE_MODE: Literal["w", "a"] = "w"
     CERTIFICATES_DIR: Path = Path("certificates")
     SSH_DIR: Path = CERTIFICATES_DIR / "ssh"
+
     DATA_DIR: Path = Path("data")
+    TMP_DIR: Path = DATA_DIR / "tmp"
+    CACHE_DIR: Path = DATA_DIR / "cache"
+    BACKUP_DIR: Path = DATA_DIR / "backup"
+    EXAMPLES_DIR: Path = DATA_DIR / "examples"
+
     MEDIA_DIR: Path = DATA_DIR / "media"
     DOCUMENT_DIR: Path = MEDIA_DIR / "document"
     VIDEO_DIR: Path = MEDIA_DIR / "video"
@@ -101,6 +100,10 @@ class ProjectConfig(BaseModel):
     @property
     def CONFIG_DIR(self) -> Path:
         return self.CONFIGS_DIR / self.SOURCE_FOLDER
+
+    @property
+    def GLOBAL_CONFIG_DIR(self) -> Path:
+        return self.CONFIGS_DIR / "global"
 
     @model_validator(mode="before")
     @classmethod
@@ -128,12 +131,18 @@ class ProjectConfig(BaseModel):
 
     @classmethod
     def check_env_file(cls, env_file_path: Path) -> None:
-        keys = _parse_env_file(env_file_path).keys()
+        keys = _parse_yaml_file(env_file_path).keys()
         with open(env_file_path, "a") as f:
             for field, info in cls.model_fields.items():
                 if field not in keys and not info.exclude:
+                    value = (
+                        info.default
+                        if os.getenv(field, None) is None
+                        else os.getenv(field)
+                    )
+
                     f.write(
-                        f"{field}={info.default if os.getenv(field, None) is None else os.getenv(field)}\n"
+                        f"{field}: {value if not isinstance(value, list) else '\n - ' + '\n - '.join(value)}\n"
                     )
 
     @model_validator(mode="after")
@@ -155,19 +164,47 @@ class ProjectConfig(BaseModel):
                             if not new_path.exists():
                                 os.mkdir(new_path)
 
+            self.GLOBAL_CONFIG_DIR.mkdir(exist_ok=True)
+
         self.DESCRIPTION = self.DESCRIPTION.format(
             self.OS, self.CONFIG_DIR, self.BASE_DIR, self.WORK_DIR, self.RUN_MODE
         )
 
         another = ""
-        try:
-            for env_file in self.CONFIG_DIR.iterdir():
-                another += f"\n# {env_file.stem.replace('_', ' ').strip('.').title()}\n"
+
+        if self.GLOBAL_CONFIG_DIR.exists():
+            for env_file in self.GLOBAL_CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                another += f"\n# {env_file.name}\n"
                 another += _show_env_info(env_file)
-        except Exception:
-            pass
+
+        if self.CONFIG_DIR.exists():
+            for env_file in self.CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                another += f"\n# {env_file.name}\n"
+                another += _show_env_info(env_file)
 
         self.DESCRIPTION += another
+
+        if self.GLOBAL_CONFIG_DIR.exists():
+            for env_file in self.GLOBAL_CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                try:
+                    source(env_file)
+                except Exception:
+                    pass
+
+        if self.CONFIG_DIR.exists():
+            for env_file in self.CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                try:
+                    source(env_file)
+                except Exception:
+                    pass
 
         return self
 
@@ -179,6 +216,9 @@ class ProjectConfig(BaseModel):
 
 
 def _parse_env_file(env_file_path: Path) -> dict[str, Any]:
+    """
+    Парсинг ключ=значение из .env-файлов.
+    """
     data = {}
     with open(env_file_path) as f:
         for line in f.readlines():
@@ -191,80 +231,162 @@ def _parse_env_file(env_file_path: Path) -> dict[str, Any]:
     return data
 
 
+def _parse_yaml_file(yaml_file_path: Path) -> dict[str, Any]:
+    with initialize_config_dir(
+        config_dir=yaml_file_path.parent.as_posix(),
+        job_name="terminal_app",
+        version_base=None,
+    ):
+        cfg_name = yaml_file_path.stem
+
+        conf = compose(config_name=cfg_name)
+
+    conf_dict: dict[str, Any] = OmegaConf.to_container(conf, resolve=True)  # type: ignore
+    return conf_dict
+
+
 def _show_env_info(env_file_path: Path) -> str:
+    """
+    Вывод таблицы "ключ | текущее значение в окружении | значение в файле"
+    """
     columns = ["name", "env", "file"]
     rows = []
 
-    for name, file in _parse_env_file(env_file_path).items():
-        rows.append((name, os.getenv(name), file))
+    if env_file_path.suffix in (".yml", ".yaml"):
+        data: dict[str, Any] = _parse_yaml_file(env_file_path)
+    elif env_file_path.suffix == ".json":
+        data = json.loads(env_file_path.read_text())
+    else:
+        data = _parse_env_file(env_file_path)
+
+    if env_file_path.name[0] != ".":
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
+    for name, file_val in data.items():
+        rows.append((name, os.getenv(name), file_val))
 
     return tabulate(rows, headers=columns, tablefmt="psql")
 
 
 class SourceEnv(dict):
+    """
+    Класс для хранения конфигурации. При попытке получить
+    несуществующий ключ, выбрасывает KeyError с осмысленным сообщением.
+    """
 
     def __getitem__(self, key: str) -> Any:
         try:
             return super().__getitem__(key)
         except KeyError as ex:
             new_ex = KeyError(
-                f"Key '{key}' not found in the configuration environment. Configuration directory: {PROJECT_CONFIG.CONFIG_DIR.as_posix()}"
+                f"Key '{key}' not found in the configuration environment. "
+                f"Configuration directory: {PROJECT_CONFIG.CONFIG_DIR.as_posix()}"
             )
             raise new_ex from ex
 
 
 def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
-    data: dict[str, str] = {}
+    """
+    Универсальная функция для чтения конфигураций из .env и .yaml/.yml.
+    - Если файл .env (или .dotenv), то грузим через load_dotenv.
+    - Если YAML, то грузим через OmegaConf.load.
+      Если имя файла начинается с точки (например, .secret.yaml),
+      то все считанные ключи добавляем в переменные окружения.
+      Иначе просто складываем их в результирующий словарь.
+    """
+    data: dict[str, Any] = {}
     assert (
         env_files != _CONFIG_NAME
     ), f"The env file cannot be assigned the name  {_CONFIG_NAME}"
 
-    def _get_path(env_file: str) -> Path:
-        config_path = PROJECT_CONFIG.CONFIG_DIR
-
-        return config_path / env_file
-
-    def _source(env_file_path: Path) -> None:
-        assert env_file_path.name.endswith(
-            ".env"
-        ), "The configuration file must end in .env"
-
+    def load_env_file(env_file_path: Path) -> None:
         if not env_file_path.exists():
             with open(env_file_path, "w") as f:
                 f.write(f"# {env_file_path.name}\n")
-
             print(f"Create {env_file_path}")
 
         load_dotenv(env_file_path)
-
-    def load_variables(env_file_path: Path) -> None:
         keys = _parse_env_file(env_file_path).keys()
+        load_values(keys)
+
+    def load_values(keys):
         for key in keys:
             variable = os.getenv(key, "")
-            if variable.startswith("["):
+            if variable.isdigit():
+                variable = int(variable)
+            elif variable.strip().startswith("[") or variable.strip().startswith("{"):
                 try:
                     variable = json.loads(variable.replace("'", '"'))
-                except:
+                except Exception:
                     pass
-
+            elif variable.lower() not in ("true", "false"):
+                try:
+                    variable = float(variable)
+                except Exception:
+                    pass
             data[key] = variable
 
-    if isinstance(env_files, str | Path):
-        if isinstance(env_files, Path):
-            path = env_files
-        else:
-            path = _get_path(env_files)
-        _source(path)
-        load_variables(path)
+    def load_yaml_file(yaml_file_path: Path) -> None:
+        nonlocal data
+        if not yaml_file_path.exists():
+            with open(yaml_file_path, "w") as f:
+                f.write(f"# {yaml_file_path.name}\n")
+            print(f"Create {yaml_file_path}")
 
+        conf_dict = _parse_yaml_file(yaml_file_path)
+
+        if yaml_file_path.name.startswith("."):
+            for k, v in conf_dict.items():
+                if os.getenv(k) is None:
+                    os.environ[k] = str(v)
+
+            load_values(conf_dict.keys())
+        else:
+            data = conf_dict
+
+    def load_json_file(json_file_path: Path) -> None:
+        nonlocal data
+        if not json_file_path.exists():
+            with open(json_file_path, "w") as f:
+                f.write("{}")
+            print(f"Create {json_file_path}")
+
+        conf_dict = json.loads(json_file_path.read_text())
+
+        if json_file_path.name.startswith("."):
+            for k, v in conf_dict.items():
+                if os.getenv(k) is None:
+                    os.environ[k] = str(v)
+
+            load_values(conf_dict.keys())
+        else:
+            data = conf_dict
+
+    def handle_one_file(env_file: str | Path):
+        if isinstance(env_file, Path):
+            path = env_file
+        else:
+            path = PROJECT_CONFIG.CONFIG_DIR / env_file
+            if not path.exists():
+                path = PROJECT_CONFIG.GLOBAL_CONFIG_DIR / env_file
+
+        suffix = path.suffix.lower()
+        if suffix in (".env", ".dotenv"):
+            load_env_file(path)
+        elif suffix in (".yml", ".yaml"):
+            load_yaml_file(path)
+        elif suffix == ".json":
+            load_json_file(path)
+        else:
+            raise ValueError(
+                f"Unsupported file format '{suffix}'. Must be .env/.dotenv or .yml/.yaml"
+            )
+
+    if isinstance(env_files, (str, Path)):
+        handle_one_file(env_files)
     else:
         for env_file in env_files:
-            if isinstance(env_file, Path):
-                path = env_file
-            else:
-                path = _get_path(env_file)
-            _source(path)
-            load_variables(path)
+            handle_one_file(env_file)
 
     return SourceEnv(data)
 

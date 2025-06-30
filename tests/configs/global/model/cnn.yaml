@@ -1,0 +1,10 @@
+# @package model
+_type_: CNN
+layers:
+  - filters: 32
+    kernel_size: 3
+    activation: relu
+  - filters: 64
+    kernel_size: 3
+    activation: relu
+output_activation: softmax

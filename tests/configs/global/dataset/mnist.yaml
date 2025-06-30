@@ -1,0 +1,6 @@
+# @package dataset
+name: mnist
+path: ./data/mnist
+input_size: [28, 28]
+num_classes: 10
+normalize: true

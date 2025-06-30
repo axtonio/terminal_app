@@ -1,0 +1,4 @@
+# @package experiment
+epochs: 10
+validate_every: 200
+early_stopping_patience: 3

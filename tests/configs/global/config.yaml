@@ -1,0 +1,10 @@
+defaults:
+  - dataset: mnist
+  - model: cnn
+  - optimizer: adam
+  - experiment: small
+  - _self_
+
+seed: ${oc.env:LOL,localhost}
+batch_size: 64
+log_dir: ./logs
