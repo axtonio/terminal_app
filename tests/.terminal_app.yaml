@@ -20,4 +20,4 @@ DOCUMENT_DIR: data/media/document
 VIDEO_DIR: data/media/video
 PHOTO_DIR: data/media/photo
 INIT_FOLDERS: False
-TERMINAL_APP_LOGGER: False
+TERMINAL_APP_LOGGER: true

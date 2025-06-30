@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import platform
+import requests
 from typing import Literal, Any
 
 from pathlib import Path
@@ -188,24 +189,6 @@ class ProjectConfig(BaseModel):
 
         self.DESCRIPTION += another
 
-        if self.GLOBAL_CONFIG_DIR.exists():
-            for env_file in self.GLOBAL_CONFIG_DIR.iterdir():
-                if env_file.is_dir():
-                    continue
-                try:
-                    source(env_file)
-                except Exception:
-                    pass
-
-        if self.CONFIG_DIR.exists():
-            for env_file in self.CONFIG_DIR.iterdir():
-                if env_file.is_dir():
-                    continue
-                try:
-                    source(env_file)
-                except Exception:
-                    pass
-
         return self
 
     def __str__(self) -> str:
@@ -312,6 +295,20 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
     def load_values(keys):
         for key in keys:
             variable = os.getenv(key, "")
+            if variable == "REMOTE":
+                remote_conf = source("remote.yaml")["remotes"]
+                url = f"http://{remote_conf['HOST']}:{remote_conf['PORT']}/{remote_conf.get('TOKEN', '')}{key}"
+                try:
+                    response = requests.get(url)
+                    response.raise_for_status()  # Проверка на ошибки
+                    variable = response.text.strip()
+                    print(f"{key} | Полученный ключ: {variable}")
+                except requests.exceptions.RequestException as ex:
+                    variable = ""
+                    print(f"{key} | Ошибка при запросе: {ex}")
+
+                os.environ[key] = variable
+
             if variable.isdigit():
                 variable = int(variable)
             elif variable.strip().startswith("[") or variable.strip().startswith("{"):
@@ -392,3 +389,22 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
 
 
 PROJECT_CONFIG = ProjectConfig()
+
+if PROJECT_CONFIG.GLOBAL_CONFIG_DIR.exists():
+    for env_file in PROJECT_CONFIG.GLOBAL_CONFIG_DIR.iterdir():
+        if env_file.is_dir():
+            continue
+        try:
+            source(env_file)
+        except Exception as ex:
+            print(ex)
+            pass
+
+if PROJECT_CONFIG.CONFIG_DIR.exists():
+    for env_file in PROJECT_CONFIG.CONFIG_DIR.iterdir():
+        if env_file.is_dir():
+            continue
+        try:
+            source(env_file)
+        except Exception:
+            pass
