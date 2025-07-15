@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ["source", "SourceEnv", "PROJECT_CONFIG"]
+__all__ = ["source", "SourceEnv", "ProjectConfig"]
 
 import __main__
 import os
@@ -8,7 +8,7 @@ import sys
 import json
 import platform
 import requests
-from typing import Literal, Any
+from typing import Literal, Any, Callable
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -17,6 +17,8 @@ from tabulate import tabulate
 from omegaconf import OmegaConf
 from hydra import initialize_config_dir, compose
 from pydantic import BaseModel, model_validator, Field
+
+from terminal_app.logging import TERMINAL_APP_LOGGER
 
 
 _RUN_MODE: Literal["script", "module", "jupyter", "bin"]
@@ -66,29 +68,41 @@ CONFIG_FILE = _BASE_DIR / _CONFIG_NAME
 class ProjectConfig(BaseModel):
     BASE_DIR: Path = Field(default=_BASE_DIR, init=False, exclude=True)
     WORK_DIR: Path = Field(default=_WORK_DIR, init=False, exclude=True)
-    CONFIGS_DIR: Path = Path("configs")
-    CONFIG_FOLDERS: list = ["development", "production", "test"]
-    SOURCE_FOLDER: str = "development"
+    GLOB_CONFIG_DIR: Path = Path("configs")
+    MODE_CONFIG_DIR: Path = Path("configs/dev")
+
     LOGGING_DIR: Path = Path("logging")
     LOGGING_SUFFIX: str = "terminal_app"
     LOGGING_FILE_MODE: Literal["w", "a"] = "w"
-    CERTIFICATES_DIR: Path = Path("certificates")
-    SSH_DIR: Path = CERTIFICATES_DIR / "ssh"
-
-    DATA_DIR: Path = Path("data")
-    TMP_DIR: Path = DATA_DIR / "tmp"
-    CACHE_DIR: Path = DATA_DIR / "cache"
-    BACKUP_DIR: Path = DATA_DIR / "backup"
-    EXAMPLES_DIR: Path = DATA_DIR / "examples"
-
-    MEDIA_DIR: Path = DATA_DIR / "media"
-    DOCUMENT_DIR: Path = MEDIA_DIR / "document"
-    VIDEO_DIR: Path = MEDIA_DIR / "video"
-    PHOTO_DIR: Path = MEDIA_DIR / "photo"
+    TERMINAL_APP_LOGGER: bool = False
 
     INIT_FOLDERS: bool = False
-    TERMINAL_APP_LOGGER: bool = False
-    DESCRIPTION: str = Field(init=False, exclude=True)
+    CONFIG_DESC: str = Field(init=False, exclude=True)
+
+    PROJECT_DESC: Callable[[ProjectConfig], str] = Field(
+        default=lambda x: x.CONFIG_DESC, exclude=True
+    )
+
+    def model_post_init(self, context: Any) -> None:
+        if self.GLOB_CONFIG_DIR.exists():
+            for env_file in self.GLOB_CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                try:
+                    source(env_file)
+                except Exception:
+                    pass
+
+        if self.MODE_CONFIG_DIR.exists():
+            for env_file in self.MODE_CONFIG_DIR.iterdir():
+                if env_file.is_dir():
+                    continue
+                try:
+                    source(env_file)
+                except Exception:
+                    pass
+
+        return super().model_post_init(context)
 
     @property
     def OS(self) -> str:
@@ -98,14 +112,6 @@ class ProjectConfig(BaseModel):
     def RUN_MODE(self) -> str:
         return _RUN_MODE
 
-    @property
-    def CONFIG_DIR(self) -> Path:
-        return self.CONFIGS_DIR / self.SOURCE_FOLDER
-
-    @property
-    def GLOBAL_CONFIG_DIR(self) -> Path:
-        return self.CONFIGS_DIR / "global"
-
     @model_validator(mode="before")
     @classmethod
     def init_project(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -113,27 +119,29 @@ class ProjectConfig(BaseModel):
             with open(CONFIG_FILE, "w") as f:
                 f.write(f"# {CONFIG_FILE.name}\n")
 
-            print(f"Create {CONFIG_FILE}")
+            TERMINAL_APP_LOGGER.info(f"Create {CONFIG_FILE}")
 
-        ProjectConfig.check_env_file(CONFIG_FILE)
+        cls.check_env_file(CONFIG_FILE)
 
-        desc = f"# Terminal App\n- OS: {{}}\n- CONFIG: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {{}}\n{_show_env_info(CONFIG_FILE)}"
+        desc = f"# Terminal App\n- OS: {{}}\n- GLOB_CONFIG_DIR: {{}}\n- MODE_CONFIG_DIR: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {{}}\n{_show_env_info(CONFIG_FILE)}"
 
-        data = source(CONFIG_FILE)
-        data["INIT_FOLDERS"] = data["INIT_FOLDERS"].lower()
-        data["TERMINAL_APP_LOGGER"] = data["TERMINAL_APP_LOGGER"].lower()
-        data["DESCRIPTION"] = desc
+        source_data = source(CONFIG_FILE)
 
-        assert (
-            data["SOURCE_FOLDER"] in data["CONFIG_FOLDERS"]
-        ), "SOURCE_FOLDER should be located in the CONFIG_FOLDERS"
+        for key, value in data.items():
+            if not isinstance(value, Callable):
+                os.environ[key] = str(value)
+
+        source_data.update(data)
+        data = source_data
+
+        data["CONFIG_DESC"] = desc
 
         return data
 
     @classmethod
     def check_env_file(cls, env_file_path: Path) -> None:
         keys = _parse_yaml_file(env_file_path).keys()
-        with open(env_file_path, "a") as f:
+        with open(env_file_path, "a+") as f:
             for field, info in cls.model_fields.items():
                 if field not in keys and not info.exclude:
                     value = (
@@ -142,13 +150,26 @@ class ProjectConfig(BaseModel):
                         else os.getenv(field)
                     )
 
-                    f.write(
-                        f"{field}: {value if not isinstance(value, list) else '\n - ' + '\n - '.join(value)}\n"
-                    )
+                    if isinstance(value, list):
+                        formatted_value = "\n - " + "\n - ".join(map(str, value))
+                    else:
+                        formatted_value = value
+
+                    try:
+                        f.seek(0, 2)
+                        f.seek(f.tell() - 1)
+                        last_char = f.read(1)
+                        if last_char != "\n":
+                            f.write("\n")
+                    except:
+                        pass
+
+                    f.write(f"{field}: {formatted_value}\n")
 
     @model_validator(mode="after")
     def check_init_folders(self):
         for name, path in self:
+            os.environ[name] = str(path)
             if isinstance(path, Path):
                 if not path.is_absolute():
                     setattr(self, name, self.BASE_DIR / path.as_posix())
@@ -159,43 +180,44 @@ class ProjectConfig(BaseModel):
                     if not path.exists():
                         os.mkdir(path)
 
-                    if name == "CONFIGS_DIR":
-                        for sub_path in self.CONFIG_FOLDERS:
-                            new_path = path / sub_path
-                            if not new_path.exists():
-                                os.mkdir(new_path)
+            self.GLOB_CONFIG_DIR.mkdir(exist_ok=True)
 
-            self.GLOBAL_CONFIG_DIR.mkdir(exist_ok=True)
-
-        self.DESCRIPTION = self.DESCRIPTION.format(
-            self.OS, self.CONFIG_DIR, self.BASE_DIR, self.WORK_DIR, self.RUN_MODE
+        self.CONFIG_DESC = self.CONFIG_DESC.format(
+            self.OS,
+            self.GLOB_CONFIG_DIR,
+            self.MODE_CONFIG_DIR,
+            self.BASE_DIR,
+            self.WORK_DIR,
+            self.RUN_MODE,
         )
 
         another = ""
 
-        if self.GLOBAL_CONFIG_DIR.exists():
-            for env_file in self.GLOBAL_CONFIG_DIR.iterdir():
+        if self.GLOB_CONFIG_DIR.exists():
+            for env_file in self.GLOB_CONFIG_DIR.iterdir():
                 if env_file.is_dir():
                     continue
                 another += f"\n# {env_file.name}\n"
                 another += _show_env_info(env_file)
 
-        if self.CONFIG_DIR.exists():
-            for env_file in self.CONFIG_DIR.iterdir():
+        if self.MODE_CONFIG_DIR.exists():
+            for env_file in self.MODE_CONFIG_DIR.iterdir():
                 if env_file.is_dir():
                     continue
                 another += f"\n# {env_file.name}\n"
                 another += _show_env_info(env_file)
 
-        self.DESCRIPTION += another
+        self.CONFIG_DESC += another
+
+        TERMINAL_APP_LOGGER.info("\n" + self.PROJECT_DESC(self))
 
         return self
 
     def __str__(self) -> str:
-        return self.DESCRIPTION
+        return self.PROJECT_DESC(self)
 
     def __repr__(self) -> str:
-        return self.DESCRIPTION
+        return self.PROJECT_DESC(self)
 
 
 def _parse_env_file(env_file_path: Path) -> dict[str, Any]:
@@ -263,7 +285,7 @@ class SourceEnv(dict):
         except KeyError as ex:
             new_ex = KeyError(
                 f"Key '{key}' not found in the configuration environment. "
-                f"Configuration directory: {PROJECT_CONFIG.CONFIG_DIR.as_posix()}"
+                f"Configuration directory: {os.environ.get('CONFIG_DIR', 'configs')}"
             )
             raise new_ex from ex
 
@@ -282,30 +304,25 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
         env_files != _CONFIG_NAME
     ), f"The env file cannot be assigned the name  {_CONFIG_NAME}"
 
-    def load_env_file(env_file_path: Path) -> None:
-        if not env_file_path.exists():
-            with open(env_file_path, "w") as f:
-                f.write(f"# {env_file_path.name}\n")
-            print(f"Create {env_file_path}")
-
-        load_dotenv(env_file_path)
-        keys = _parse_env_file(env_file_path).keys()
-        load_values(keys)
-
     def load_values(keys):
         for key in keys:
             variable = os.getenv(key, "")
             if variable == "REMOTE":
                 remote_conf = source("remote.yaml")["remotes"]
                 url = f"http://{remote_conf['HOST']}:{remote_conf['PORT']}/{remote_conf.get('TOKEN', '')}{key}"
+                message = "Remote request | {status} | {result}"
                 try:
                     response = requests.get(url)
                     response.raise_for_status()  # Проверка на ошибки
                     variable = response.text.strip()
-                    print(f"{key} | Полученный ключ: {variable}")
+                    TERMINAL_APP_LOGGER.info(
+                        message.format(status=f"SUCCESS", result=f"{key}:{variable}")
+                    )
                 except requests.exceptions.RequestException as ex:
                     variable = ""
-                    print(f"{key} | Ошибка при запросе: {ex}")
+                    TERMINAL_APP_LOGGER.error(
+                        message.format(status=f"FAILED", result=f"{key}:{ex}")
+                    )
 
                 os.environ[key] = variable
 
@@ -321,14 +338,19 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
                     variable = float(variable)
                 except Exception:
                     pass
+            elif variable.lower() in ("true", "false"):
+                variable = True if variable.lower() == "true" else False
+
             data[key] = variable
+
+    def load_env_file(env_file_path: Path) -> None:
+
+        load_dotenv(env_file_path)
+        keys = _parse_env_file(env_file_path).keys()
+        load_values(keys)
 
     def load_yaml_file(yaml_file_path: Path) -> None:
         nonlocal data
-        if not yaml_file_path.exists():
-            with open(yaml_file_path, "w") as f:
-                f.write(f"# {yaml_file_path.name}\n")
-            print(f"Create {yaml_file_path}")
 
         conf_dict = _parse_yaml_file(yaml_file_path)
 
@@ -343,10 +365,6 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
 
     def load_json_file(json_file_path: Path) -> None:
         nonlocal data
-        if not json_file_path.exists():
-            with open(json_file_path, "w") as f:
-                f.write("{}")
-            print(f"Create {json_file_path}")
 
         conf_dict = json.loads(json_file_path.read_text())
 
@@ -363,11 +381,26 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
         if isinstance(env_file, Path):
             path = env_file
         else:
-            path = PROJECT_CONFIG.CONFIG_DIR / env_file
+            path = (
+                Path(os.environ.get("MODE_CONFIG_DIR", "configs")).absolute() / env_file
+            )
             if not path.exists():
-                path = PROJECT_CONFIG.GLOBAL_CONFIG_DIR / env_file
+                path = (
+                    Path(os.environ.get("GLOB_CONFIG_DIR", "configs")).absolute()
+                    / env_file
+                )
 
         suffix = path.suffix.lower()
+
+        if not path.exists():
+            with open(path, "w") as f:
+                if suffix == ".json":
+                    f.write("{}")
+                else:
+                    f.write(f"# {path.name}\n")
+            TERMINAL_APP_LOGGER.warning(f"Create {path}")
+            return
+
         if suffix in (".env", ".dotenv"):
             load_env_file(path)
         elif suffix in (".yml", ".yaml"):
@@ -386,25 +419,3 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
             handle_one_file(env_file)
 
     return SourceEnv(data)
-
-
-PROJECT_CONFIG = ProjectConfig()
-
-if PROJECT_CONFIG.GLOBAL_CONFIG_DIR.exists():
-    for env_file in PROJECT_CONFIG.GLOBAL_CONFIG_DIR.iterdir():
-        if env_file.is_dir():
-            continue
-        try:
-            source(env_file)
-        except Exception as ex:
-            print(ex)
-            pass
-
-if PROJECT_CONFIG.CONFIG_DIR.exists():
-    for env_file in PROJECT_CONFIG.CONFIG_DIR.iterdir():
-        if env_file.is_dir():
-            continue
-        try:
-            source(env_file)
-        except Exception:
-            pass

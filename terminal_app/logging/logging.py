@@ -17,12 +17,11 @@ import sys
 import logging
 from pathlib import Path
 from inspect import getfile
+from distutils.util import strtobool
 from logging import Logger, FileHandler
 from typing import Any, overload, Literal
 
-from terminal_app.env import PROJECT_CONFIG
-
-suffix = PROJECT_CONFIG.LOGGING_SUFFIX
+suffix = lambda: os.environ.get("LOGGING_SUFFIX", "terminal_app")
 
 DEFAULT_FORMATTER = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 DEFAULT_STREAM = logging.StreamHandler()
@@ -82,7 +81,7 @@ class TerminalAppHandler(FileHandler):
 class TerminalAppLogger(Logger):
 
     def _log(self, *args, **kwargs) -> None:
-        if PROJECT_CONFIG.TERMINAL_APP_LOGGER:
+        if strtobool(os.environ.get("TERMINAL_APP_LOGGER", "0")):
             return super()._log(*args, **kwargs)
 
 
@@ -157,7 +156,7 @@ def register_logger(
             logger.removeHandler(handler)
     else:
         if name is not None:
-            naming = f"{suffix}.{name}"
+            naming = f"{suffix()}.{name}"
             if naming in logging.Logger.manager.loggerDict.keys():
                 if if_exist == "clear":
                     logger = logging.getLogger(naming)
@@ -173,29 +172,28 @@ def register_logger(
             ), "The same name of the loggers"
             logger = logging.getLogger(naming)
         else:
-            logger = TerminalAppLogger(suffix, level)
+            logger = TerminalAppLogger(suffix(), level)
 
     if not without_handlers:
 
         if path is not None:
+            mode = os.environ.get("LOGGING_FILE_MODE", "w")
             if not terminal_app_handler:
-                file_handler = logging.FileHandler(
-                    file_path.as_posix(), mode=PROJECT_CONFIG.LOGGING_FILE_MODE
-                )
+                file_handler = logging.FileHandler(file_path.as_posix(), mode=mode)
             else:
                 file_handler = TerminalAppHandler(
                     terminal_app_stream,
                     file_path.as_posix(),
-                    mode=PROJECT_CONFIG.LOGGING_FILE_MODE,
+                    mode=mode,
                 )
 
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
 
-            if PROJECT_CONFIG.LOGGING_FILE_MODE.lower() != "w":
+            if mode.lower() != "w":
 
-                with open(file_path, f"{PROJECT_CONFIG.LOGGING_FILE_MODE}+") as f:
+                with open(file_path, f"{mode}+") as f:
                     f.seek(0)
                     lines = f.readlines()
                     lines.reverse()
@@ -207,8 +205,7 @@ def register_logger(
                             try:
                                 count = int(line[-2]) + 1
                                 break
-                            except Exception as ex:
-                                print(ex)
+                            except Exception:
                                 continue
 
                     f.write(message.format(count))
@@ -222,7 +219,7 @@ def register_logger(
 
 
 class LoggingMeta(type):
-    __root_path__: Path = PROJECT_CONFIG.LOGGING_DIR
+    __root_path__: Path = Path(os.environ.get("LOGGING_DIR", "logging"))
     logger: Logger
     root_logger: Logger
 
@@ -258,8 +255,7 @@ class RootLogging(metaclass=LoggingMeta):
 
 
 def getTerminalAppLogger(name: str) -> Logger:
-    return logging.getLogger(f"{PROJECT_CONFIG.LOGGING_SUFFIX}.{name}")
+    return logging.getLogger(f"{suffix()}.{name}")
 
 
 TERMINAL_APP_LOGGER = register_logger()
-TERMINAL_APP_LOGGER.info("\n" + str(PROJECT_CONFIG))

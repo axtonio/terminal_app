@@ -1,15 +1,13 @@
 # .terminal_app.yaml
-CONFIGS_DIR: configs
-CONFIG_FOLDERS: 
- - development
- - production
- - test
-SOURCE_FOLDER: development
+GLOB_CONFIG_DIR: configs/global
+MODE_CONFIG_DIR: configs/dev
 LOGGING_DIR: logging
 LOGGING_SUFFIX: terminal_app
 LOGGING_FILE_MODE: w
-CERTIFICATES_DIR: certificates
-SSH_DIR: certificates/ssh
+TERMINAL_APP_LOGGER: True
+INIT_FOLDERS: False
+CERTIFICATES_DIR: certs
+SSH_DIR: certs/ssh
 DATA_DIR: data
 TMP_DIR: data/tmp
 CACHE_DIR: data/cache
@@ -19,5 +17,7 @@ MEDIA_DIR: data/media
 DOCUMENT_DIR: data/media/document
 VIDEO_DIR: data/media/video
 PHOTO_DIR: data/media/photo
-INIT_FOLDERS: False
-TERMINAL_APP_LOGGER: true
+MODES: 
+ - a
+ - b
+ - c

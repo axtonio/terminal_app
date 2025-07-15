@@ -1,40 +1,46 @@
-__all__ = ["CERTIFICATES_DIR", "verify_ssl_certificate"]
+__all__ = ["verify_ssl_certificate"]
 
+import os
 import certifi
 import requests
+from pathlib import Path
+from typing import Callable
+from terminal_app.logging import TERMINAL_APP_LOGGER
 
-from .env import PROJECT_CONFIG
 
-CERTIFICATES_DIR = PROJECT_CONFIG.CERTIFICATES_DIR
+def verify_ssl_certificate(
+    url: str,
+    cert_dir: Path | Callable[[], Path] = lambda: Path(
+        os.environ.get("CERTS_DIR", "certs")
+    ),
+):
 
-
-def verify_ssl_certificate(url: str):
+    if isinstance(cert_dir, Callable):
+        cert_dir = cert_dir()
 
     for attempt in range(2):
-        message: str
         try:
             requests.get(url=url, verify=True)
-        except requests.exceptions.SSLError as ex:
-            assert CERTIFICATES_DIR.exists(), "The folder must exist"
-            assert (
-                CERTIFICATES_DIR.is_dir()
-            ), "The certificates folder should be a directory"
+        except requests.exceptions.SSLError:
+            assert cert_dir.exists(), "The folder must exist"
+            assert cert_dir.is_dir(), "The certificates folder should be a directory"
             if attempt == 0:
 
                 cert_file = certifi.where()
 
-                for file in CERTIFICATES_DIR.iterdir():
+                for file in cert_dir.iterdir():
                     if file.is_file():
                         if file.suffix == ".pem":
                             with open(file, "rb") as infile:
                                 custom_cert = infile.read()
                             with open(cert_file, "ab") as outfile:
                                 outfile.write(custom_cert)
-                            print(f"Added the {file.name} to the certificates")
+                            TERMINAL_APP_LOGGER.info(
+                                f"Added the {file.name} to the certificates"
+                            )
 
                 continue
 
-            print("INFO: the certificates were not installed")
+            TERMINAL_APP_LOGGER.warning("The certificates were not installed")
 
-    message = "Certificates found..."
-    print(message)
+    TERMINAL_APP_LOGGER.info("Certificates found...")

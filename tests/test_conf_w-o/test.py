@@ -1,3 +1,3 @@
-from terminal_app.env import PROJECT_CONFIG
+from terminal_app.env import CONFIG_DESC
 
-print(PROJECT_CONFIG)
+print(CONFIG_DESC)
