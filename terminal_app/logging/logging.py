@@ -19,7 +19,7 @@ from pathlib import Path
 from inspect import getfile
 from distutils.util import strtobool
 from logging import Logger, FileHandler
-from typing import Any, overload, Literal
+from typing import Any, overload, Literal, Callable
 
 suffix = lambda: os.environ.get("LOGGING_SUFFIX", "terminal_app")
 
@@ -219,19 +219,22 @@ def register_logger(
 
 
 class LoggingMeta(type):
-    __root_path__: Path = Path(os.environ.get("LOGGING_DIR", "logging"))
+    __root_path__: Callable[[], Path] = lambda: Path(
+        os.environ.get("LOGGING_DIR", "logging")
+    )
     logger: Logger
     root_logger: Logger
 
     @property
     def root_path(cls) -> Path:
         create_folder = False
-        create_folder = not LoggingMeta.__root_path__.exists()
-        create_folder = not LoggingMeta.__root_path__.is_dir()
+        root_path = LoggingMeta.__root_path__()
+        create_folder = not root_path.exists()
+        create_folder = not root_path.is_dir()
         if create_folder:
-            os.mkdir(LoggingMeta.__root_path__)
+            os.mkdir(root_path)
 
-        return LoggingMeta.__root_path__
+        return root_path
 
     def __new__(
         mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any]

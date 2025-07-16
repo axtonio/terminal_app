@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from tabulate import tabulate
 from omegaconf import OmegaConf
 from hydra import initialize_config_dir, compose
-from pydantic import BaseModel, model_validator, Field
+from pydantic import BaseModel, model_validator, Field, ConfigDict
 
 from terminal_app.logging import TERMINAL_APP_LOGGER
 
@@ -83,26 +83,30 @@ class ProjectConfig(BaseModel):
         default=lambda x: x.CONFIG_DESC, exclude=True
     )
 
-    def model_post_init(self, context: Any) -> None:
-        if self.GLOB_CONFIG_DIR.exists():
-            for env_file in self.GLOB_CONFIG_DIR.iterdir():
-                if env_file.is_dir():
-                    continue
-                try:
-                    source(env_file)
-                except Exception:
-                    pass
+    # def model_post_init(self, context: Any) -> None:
+    #     if self.GLOB_CONFIG_DIR.exists():
+    #         for env_file in self.GLOB_CONFIG_DIR.iterdir():
+    #             if env_file.is_dir():
+    #                 continue
+    #             try:
+    #                 source(env_file)
+    #             except Exception:
+    #                 pass
 
-        if self.MODE_CONFIG_DIR.exists():
-            for env_file in self.MODE_CONFIG_DIR.iterdir():
-                if env_file.is_dir():
-                    continue
-                try:
-                    source(env_file)
-                except Exception:
-                    pass
+    #     if self.MODE_CONFIG_DIR.exists():
+    #         for env_file in self.MODE_CONFIG_DIR.iterdir():
+    #             if env_file.is_dir():
+    #                 continue
+    #             try:
+    #                 source(env_file)
+    #             except Exception:
+    #                 pass
 
-        return super().model_post_init(context)
+    #     return super().model_post_init(context)
+
+    model_config = ConfigDict(
+        extra="allow",
+    )
 
     @property
     def OS(self) -> str:
@@ -115,21 +119,16 @@ class ProjectConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def init_project(cls, data: dict[str, Any]) -> dict[str, Any]:
-        if not CONFIG_FILE.exists():
-            with open(CONFIG_FILE, "w") as f:
-                f.write(f"# {CONFIG_FILE.name}\n")
-
-            TERMINAL_APP_LOGGER.info(f"Create {CONFIG_FILE}")
 
         cls.check_env_file(CONFIG_FILE)
-
-        desc = f"# Terminal App\n- OS: {{}}\n- GLOB_CONFIG_DIR: {{}}\n- MODE_CONFIG_DIR: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {{}}\n{_show_env_info(CONFIG_FILE)}"
-
-        source_data = source(CONFIG_FILE)
 
         for key, value in data.items():
             if not isinstance(value, Callable):
                 os.environ[key] = str(value)
+
+        desc = f"# Terminal App\n- OS: {{}}\n- GLOB_CONFIG_DIR: {{}}\n- MODE_CONFIG_DIR: {{}}\n- BASE_DIR: {{}}\n- WORK_DIR: {{}}\n- RUN_MODE: {{}}\n{_show_env_info(CONFIG_FILE)}"
+
+        source_data = source(CONFIG_FILE)
 
         source_data.update(data)
         data = source_data
@@ -140,6 +139,13 @@ class ProjectConfig(BaseModel):
 
     @classmethod
     def check_env_file(cls, env_file_path: Path) -> None:
+
+        if not CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "w") as f:
+                f.write(f"# {CONFIG_FILE.name}\n")
+
+            TERMINAL_APP_LOGGER.info(f"Create {CONFIG_FILE}")
+
         keys = _parse_yaml_file(env_file_path).keys()
         with open(env_file_path, "a+") as f:
             for field, info in cls.model_fields.items():
@@ -172,7 +178,18 @@ class ProjectConfig(BaseModel):
             os.environ[name] = str(path)
             if isinstance(path, Path):
                 if not path.is_absolute():
-                    setattr(self, name, self.BASE_DIR / path.as_posix())
+                    abs_path = self.BASE_DIR / path.as_posix()
+                    setattr(self, name, abs_path)
+                    os.environ[name] = abs_path.as_posix()
+
+        if self.model_extra:
+            try:
+                for name, path in self.model_extra.items():
+                    if not Path(path).is_absolute():
+                        abs_path = self.BASE_DIR / Path(path).as_posix()
+                        os.environ[name] = abs_path.as_posix()
+            except Exception:
+                pass
 
         if self.INIT_FOLDERS:
             for name, path in self:
@@ -393,6 +410,7 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
         suffix = path.suffix.lower()
 
         if not path.exists():
+            path.parent.mkdir(exist_ok=True)
             with open(path, "w") as f:
                 if suffix == ".json":
                     f.write("{}")

@@ -1,4 +1,4 @@
-__all__ = ["verify_ssl_certificate"]
+__all__ = ["verify_ssl_certs"]
 
 import os
 import certifi
@@ -8,7 +8,7 @@ from typing import Callable
 from terminal_app.logging import TERMINAL_APP_LOGGER
 
 
-def verify_ssl_certificate(
+def verify_ssl_certs(
     url: str,
     cert_dir: Path | Callable[[], Path] = lambda: Path(
         os.environ.get("CERTS_DIR", "certs")
