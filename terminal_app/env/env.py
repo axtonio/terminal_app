@@ -8,7 +8,7 @@ import sys
 import json
 import platform
 import requests
-from typing import Literal, Any, Callable
+from typing import Literal, Any, Callable, overload
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -307,7 +307,19 @@ class SourceEnv(dict):
             raise new_ex from ex
 
 
+@overload
 def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
+    pass
+
+
+@overload
+def source(env_files: str | Path, check_only: Literal[True]) -> bool:
+    pass
+
+
+def source(
+    env_files: str | list[str] | Path | list[Path], check_only: bool = False
+) -> SourceEnv | bool:
     """
     Универсальная функция для чтения конфигураций из .env и .yaml/.yml.
     - Если файл .env (или .dotenv), то грузим через load_dotenv.
@@ -394,7 +406,7 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
         else:
             data = conf_dict
 
-    def handle_one_file(env_file: str | Path):
+    def handle_one_file(env_file: str | Path) -> bool:
         if isinstance(env_file, Path):
             path = env_file
         else:
@@ -410,6 +422,8 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
         suffix = path.suffix.lower()
 
         if not path.exists():
+            if check_only:
+                return False
             path.parent.mkdir(exist_ok=True)
             with open(path, "w") as f:
                 if suffix == ".json":
@@ -417,7 +431,10 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
                 else:
                     f.write(f"# {path.name}\n")
             TERMINAL_APP_LOGGER.warning(f"Create {path}")
-            return
+            return False
+
+        if check_only:
+            return True
 
         if suffix in (".env", ".dotenv"):
             load_env_file(path)
@@ -429,8 +446,12 @@ def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
             raise ValueError(
                 f"Unsupported file format '{suffix}'. Must be .env/.dotenv or .yml/.yaml"
             )
+        return True
 
     if isinstance(env_files, (str, Path)):
+        if check_only:
+            return handle_one_file(env_files)
+
         handle_one_file(env_files)
     else:
         for env_file in env_files:
