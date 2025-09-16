@@ -308,17 +308,22 @@ class SourceEnv(dict):
 
 
 @overload
-def source(env_files: str | list[str] | Path | list[Path]) -> SourceEnv:
+def source(
+    env_files: str | list[str] | Path | list[Path], *, raise_if_exception: bool = False
+) -> SourceEnv:
     pass
 
 
 @overload
-def source(env_files: str | Path, check_only: Literal[True]) -> bool:
+def source(env_files: str | Path, *, check_only: Literal[True]) -> bool:
     pass
 
 
 def source(
-    env_files: str | list[str] | Path | list[Path], check_only: bool = False
+    env_files: str | list[str] | Path | list[Path],
+    *,
+    check_only: bool = False,
+    raise_if_exception: bool = False,
 ) -> SourceEnv | bool:
     """
     Универсальная функция для чтения конфигураций из .env и .yaml/.yml.
@@ -352,6 +357,8 @@ def source(
                     TERMINAL_APP_LOGGER.error(
                         message.format(status=f"FAILED", result=f"{key}:{ex}")
                     )
+                    if raise_if_exception:
+                        raise ex
 
                 os.environ[key] = variable
 
