@@ -1,10 +1,10 @@
-__all__ = ["verify_ssl_certs"]
-
 import os
-import certifi
-import requests
 from pathlib import Path
 from typing import Callable
+
+import certifi
+import requests
+
 from terminal_app.logging import TERMINAL_APP_LOGGER
 
 

@@ -1,31 +1,22 @@
 from __future__ import annotations
 
-__all__ = [
-    "LoggingMeta",
-    "RootLogging",
-    "DEFAULT_STREAM",
-    "register_logger",
-    "DEFAULT_FORMATTER",
-    "TerminalAppHandler",
-    "TERMINAL_APP_LOGGER",
-    "getTerminalAppLogger",
-]
-
-import os
 import io
-import sys
 import logging
-from pathlib import Path
-from inspect import getfile
+import os
+import sys
 from distutils.util import strtobool
-from logging import Logger, FileHandler
-from typing import Any, overload, Literal, Callable
-
-suffix = lambda: os.environ.get("LOGGING_SUFFIX", "terminal_app")
+from inspect import getfile
+from logging import FileHandler, Logger
+from pathlib import Path
+from typing import Any, Callable, Literal, overload
 
 DEFAULT_FORMATTER = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 DEFAULT_STREAM = logging.StreamHandler()
 DEFAULT_STREAM.setFormatter(DEFAULT_FORMATTER)
+
+
+def _suffix():
+    return os.environ.get("LOGGING_SUFFIX", "terminal_app")
 
 
 class TerminalAppHandler(FileHandler):
@@ -73,7 +64,7 @@ class TerminalAppHandler(FileHandler):
             with open(logging_path, "r") as f:
                 return f"{logging_path}, line {len(f.readlines()) + 1}"
 
-        except:
+        except Exception:
 
             return ""
 
@@ -156,7 +147,7 @@ def register_logger(
             logger.removeHandler(handler)
     else:
         if name is not None:
-            naming = f"{suffix()}.{name}"
+            naming = f"{_suffix()}.{name}"
             if naming in logging.Logger.manager.loggerDict.keys():
                 if if_exist == "clear":
                     logger = logging.getLogger(naming)
@@ -172,7 +163,7 @@ def register_logger(
             ), "The same name of the loggers"
             logger = logging.getLogger(naming)
         else:
-            logger = TerminalAppLogger(suffix(), level)
+            logger = TerminalAppLogger(_suffix(), level)
 
     if not without_handlers:
 
@@ -258,7 +249,7 @@ class RootLogging(metaclass=LoggingMeta):
 
 
 def getTerminalAppLogger(name: str) -> Logger:
-    return logging.getLogger(f"{suffix()}.{name}")
+    return logging.getLogger(f"{_suffix()}.{name}")
 
 
 TERMINAL_APP_LOGGER = register_logger()

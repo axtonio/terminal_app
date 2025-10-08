@@ -1,25 +1,21 @@
 from __future__ import annotations
 
-__all__ = ["source", "SourceEnv", "ProjectConfig"]
+import json
+import os
+import platform
+import sys
+from pathlib import Path
+from typing import Any, Callable, Literal, overload
+
+import requests
+from dotenv import load_dotenv
+from hydra import compose, initialize_config_dir
+from omegaconf import OmegaConf
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from tabulate import tabulate
 
 import __main__
-import os
-import sys
-import json
-import platform
-import requests
-from typing import Literal, Any, Callable, overload
-
-from pathlib import Path
-from dotenv import load_dotenv
-
-from tabulate import tabulate
-from omegaconf import OmegaConf
-from hydra import initialize_config_dir, compose
-from pydantic import BaseModel, model_validator, Field, ConfigDict
-
 from terminal_app.logging import TERMINAL_APP_LOGGER
-
 
 _RUN_MODE: Literal["script", "module", "jupyter", "bin"]
 
@@ -167,7 +163,7 @@ class ProjectConfig(BaseModel):
                         last_char = f.read(1)
                         if last_char != "\n":
                             f.write("\n")
-                    except:
+                    except Exception:
                         pass
 
                     f.write(f"{field}: {formatted_value}\n")
@@ -320,7 +316,7 @@ def source(env_files: str | Path, *, check_only: Literal[True]) -> bool:
 
 
 def source(
-    env_files: str | list[str] | Path | list[Path],
+    env_files: str | list[str] | Path | list[Path] = CONFIG_FILE,
     *,
     check_only: bool = False,
     raise_if_exception: bool = False,
@@ -350,12 +346,12 @@ def source(
                     response.raise_for_status()  # Проверка на ошибки
                     variable = response.text.strip()
                     TERMINAL_APP_LOGGER.info(
-                        message.format(status=f"SUCCESS", result=f"{key}:{variable}")
+                        message.format(status="SUCCESS", result=f"{key}:{variable}")
                     )
                 except requests.exceptions.RequestException as ex:
                     variable = ""
                     TERMINAL_APP_LOGGER.error(
-                        message.format(status=f"FAILED", result=f"{key}:{ex}")
+                        message.format(status="FAILED", result=f"{key}:{ex}")
                     )
                     if raise_if_exception:
                         raise ex

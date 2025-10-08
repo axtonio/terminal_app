@@ -1,11 +1,12 @@
-__all__ = ["get_driver"]
+from __future__ import annotations
 
 import os
 import re
 import zipfile
-from typing import overload
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+from typing import TYPE_CHECKING, overload
+
+if TYPE_CHECKING:
+    from selenium import webdriver  # type: ignore
 
 
 def create_proxyauth_extension(
@@ -91,6 +92,8 @@ def get_driver(
 
 
 def get_driver(*args) -> webdriver.Chrome:
+    from selenium import webdriver  # type: ignore
+    from selenium.webdriver.chrome.options import Options  # type: ignore
 
     if len(args) == 4:
         proxy_user, proxy_pass, proxy_host, proxy_port = args

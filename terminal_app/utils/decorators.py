@@ -1,12 +1,31 @@
-__all__ = ["get_params", "safety_call"]
-
 import asyncio
 import inspect
-from functools import wraps
 from collections.abc import Mapping
-from typing import Callable, Any, Awaitable, TypeVar, overload, Coroutine
+from functools import wraps
+from typing import Any, Awaitable, Callable, Coroutine, TypeVar, overload
 
 T = TypeVar("T")
+
+
+def coroutine(func):
+    @wraps(func)
+    def wrapper_coroutine(*args, **kwargs):
+        f = func(*args, **kwargs)
+        next(f)
+        return f
+
+    return wrapper_coroutine
+
+
+class classproperty:
+    def __init__(self, func):
+        self.fget = func
+
+    def __get__(self, instance, owner):
+        return self.fget(owner)
+
+
+__all__ = ["get_params", "safety_call"]
 
 
 def get_params(
@@ -83,3 +102,28 @@ def safety_call(
         return fn(*args, **kwargs)
     else:
         return fn(*args, **kwargs)
+
+
+def set_params(
+    args: tuple[tuple[Any, int], ...] = (), kwargs: dict[str, Any] | None = None
+):
+
+    def decorator(func: Callable[..., Any]):
+
+        @wraps(func)
+        def wrapper(*a, **kw):
+            arguments = list(a)
+
+            for arg in args:
+                value, ind = arg
+                arguments.insert(ind, value)
+
+            if kwargs is not None:
+                kw.update(kwargs)
+
+            return func(*arguments, **kw)
+
+        setattr(wrapper, "__signature__", inspect.signature(func))
+        return wrapper
+
+    return decorator

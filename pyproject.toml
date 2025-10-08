@@ -9,13 +9,13 @@ readme = "README.md"
 authors = [{ name = "Antonio Rodrigues", email = "axtonio.code@gmail.com" }]
 keywords = ["terminal_app", "mipt"]
 dependencies = [
+	"tqdm",
 	"certifi",
 	"pydantic",
 	"tabulate",
 	"paramiko",
 	"requests",
 	"hydra-core",
-	"magic-filter",
 	"python-dotenv",
 	"pytest_is_running",
 ]
@@ -26,6 +26,7 @@ GitHub = "https://github.com/axtonio/terminal_app"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["terminal_app*"]
 
 [tool.setuptools.package-data]
 "*" = ['*.json']

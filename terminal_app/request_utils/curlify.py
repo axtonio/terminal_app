@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
-import json
 import requests
+
 if TYPE_CHECKING:
-    import flask
-    
+    import flask  # type: ignore
+
 import urllib.parse
 
 
@@ -62,8 +63,12 @@ class Curlify:
         Returns:
             str: string represents curl command
         """
-        curl = f"curl -X {self.request.method}{f" -H {self.headers()}" if self.headers() else ""}{f" -d '{self.body()}'" if self.body() else ""} {self.url}"
+        method_part = f"curl -X {self.request.method}"
+        headers_part = f" -H {self.headers()}" if self.headers() else ""
+        body_part = f" -d '{self.body()}'" if self.body() else ""
+        url_part = f" {self.url}"
 
+        curl = method_part + headers_part + body_part + url_part
         if self.compressed:
             curl += " --compressed"
         if not self.verify:
