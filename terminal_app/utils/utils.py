@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import multiprocessing as mp
 import os
@@ -17,6 +18,14 @@ import tqdm
 from terminal_app.logging import TERMINAL_APP_LOGGER
 
 T = TypeVar("T")
+
+
+def code_is_valid(code: str):
+    try:
+        ast.parse(code)
+        return True
+    except Exception:
+        return False
 
 
 class AllParams(UserDict):

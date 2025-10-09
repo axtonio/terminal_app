@@ -3,6 +3,7 @@ from .stdout_utils import AttentionPrint, TerminalAppFormatting, kill_all_output
 from .utils import (
     AllParams,
     chunks,
+    code_is_valid,
     fast_copy,
     filter_by_regex,
     get_path,
@@ -22,6 +23,7 @@ __all__ = [
     "kill_all_output",
     "AllParams",
     "chunks",
+    "code_is_valid",
     "fast_copy",
     "filter_by_regex",
     "get_path",
