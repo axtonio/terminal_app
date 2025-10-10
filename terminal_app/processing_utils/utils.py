@@ -10,6 +10,13 @@ import numpy as np
 from terminal_app.utils import filter_by_regex, is_regex_pattern
 
 
+def json_default(obj):
+    """Custom JSON serializer for objects not serializable by default."""
+    if isinstance(obj, Path):
+        return obj.as_posix()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
 def files_transition(
     all_files: list[tuple[Path, dict[str, Any]]],
     filtered_files: list[tuple[Path, dict[str, Any]]],
@@ -87,7 +94,9 @@ def save_meta_callback(
 ):
     meta: list[Any] = [m for _, m in list(stages.values())[-1][1]]
 
-    Path(output_path).write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    Path(output_path).write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False, default=json_default)
+    )
     print(f"Save {output_path}")
 
 
@@ -117,7 +126,6 @@ def calculate_stats(
         for field in field_configs_copy.keys():
 
             def add_value(field: str):
-
                 value = data_dict.get(field)
                 if value is not None and not math.isnan(value):
                     values_dict[field].append((path, value))
@@ -128,7 +136,6 @@ def calculate_stats(
                 ff = filter_by_regex(list(data_dict.keys()), field)
                 for f in ff:
                     field_configs[f] = field_configs[field]
-
                 [add_value(f) for f in ff]
 
     count = len(data_list)
@@ -246,7 +253,9 @@ def dataset_stats(
     if failed_output:
         Path(failed_output).write_text(
             json.dumps(
-                {p.as_posix(): e for p, e in failed_files_with_error.items()}, indent=2
+                {p.as_posix(): e for p, e in failed_files_with_error.items()},
+                indent=2,
+                default=json_default,
             )
         )
 
@@ -276,11 +285,13 @@ def dataset_stats(
 
     if stat_output:
         Path(stat_output).write_text(
-            json.dumps(stat_dict, indent=2, ensure_ascii=False)
+            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=json_default)
         )
 
     if stdout:
-        stdout(json.dumps(stat_dict, indent=2, ensure_ascii=False))
+        stdout(
+            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=json_default)
+        )
         stdout(f"Save {stat_output}")
     return stat_dict
 

@@ -207,12 +207,27 @@ def process_files(
     max_workers: int | None = None,
     root_folder: Path | None = None,
     pattern: str | None = None,
-    override_files: list[Path] | None = None,
+    override_files: list[tuple[Path, dict[str, Any]]] | None = None,
     safety: bool = False,
     without_logging: bool = False,
     start_method: Literal["fork", "spawn"] | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
     error_stdout: Callable[[Any], Any] = _stdout,
+    postprocessing_func: (
+        Callable[
+            [
+                list[tuple[Path, dict[str, Any]]],
+                list[tuple[Path, dict[str, Any]]],
+                dict[Path, str],
+            ],
+            tuple[
+                list[tuple[Path, dict[str, Any]]],
+                list[tuple[Path, dict[str, Any]]],
+                dict[Path, str],
+            ],
+        ]
+        | None
+    ) = None,
 ):
 
     assert not (safety and device == "cuda"), "Safety mode work only on cpu"
@@ -221,7 +236,7 @@ def process_files(
         max_workers = mp.cpu_count()
 
     if override_files:
-        filtered_files = [(p, {}) for p in override_files]
+        filtered_files = override_files
 
     if (
         all_files is None
@@ -296,5 +311,10 @@ def process_files(
         p.join(timeout=5)
         if p.is_alive():
             p.kill()
+
+    if postprocessing_func:
+        all_files_with_meta, filtered_files_with_meta, errors = postprocessing_func(
+            all_files_with_meta, filtered_files_with_meta, errors
+        )
 
     return all_files_with_meta, filtered_files_with_meta, errors
