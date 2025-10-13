@@ -1,124 +1,42 @@
-from __future__ import annotations
-
-import os
-import re
-import zipfile
-from typing import TYPE_CHECKING, overload
-
-if TYPE_CHECKING:
-    from selenium import webdriver  # type: ignore
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from seleniumwire import webdriver
 
 
-def create_proxyauth_extension(
-    proxy_host: str,
-    proxy_port: int,
-    proxy_user: str,
-    proxy_pass: str,
-    plugin_name: str = "proxy_auth_plugin.zip",
-) -> str:
-    """
-    Создаёт zip-расширение для Chrome с настройками прокси + авторизации.
-    Возвращает путь к созданному zip-файлу.
-    """
-    manifest_json = """
-    {
-        "version": "1.0.0",
-        "manifest_version": 2,
-        "name": "Chrome Proxy",
-        "permissions": [
-            "proxy",
-            "tabs",
-            "unlimitedStorage",
-            "storage",
-            "<all_urls>",
-            "webRequest",
-            "webRequestBlocking"
-        ],
-        "background": {
-            "scripts": ["background.js"]
-        },
-        "minimum_chrome_version":"22.0.0"
-    }
-    """
-
-    background_js = f"""
-    var config = {{
-            mode: "fixed_servers",
-            rules: {{
-                singleProxy: {{
-                    scheme: "http",
-                    host: "{proxy_host}",
-                    port: parseInt({proxy_port})
-                }},
-                bypassList: []
-            }}
-        }};
-
-    chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
-
-    function callbackFn(details) {{
-        return {{
-            authCredentials: {{
-                username: "{proxy_user}",
-                password: "{proxy_pass}"
-            }}
-        }};
-    }}
-
-    chrome.webRequest.onAuthRequired.addListener(
-        callbackFn,
-        {{urls: ["<all_urls>"]}},
-        ["blocking"]
-    );
-    """
-
-    with zipfile.ZipFile(plugin_name, "w") as zp:
-        zp.writestr("manifest.json", manifest_json)
-        zp.writestr("background.js", background_js)
-
-    return plugin_name
-
-
-@overload
-def get_driver(proxy: str, /) -> webdriver.Chrome:
-    pass
-
-
-@overload
-def get_driver(
-    proxy_user: str, proxy_pass: str, proxy_host: str, proxy_port: str, /
+def open_driver(
+    proxy: str, fullscreen: bool = True, width: int = 1920, height: int = 1080
 ) -> webdriver.Chrome:
-    pass
 
+    proxy_auth = f"http://{proxy}"
 
-def get_driver(*args) -> webdriver.Chrome:
-    from selenium import webdriver  # type: ignore
-    from selenium.webdriver.chrome.options import Options  # type: ignore
+    seleniumwire_options = {
+        "proxy": {
+            "http": proxy_auth,
+            "https": proxy_auth,
+            "no_proxy": "localhost,127.0.0.1",
+        }
+    }
 
-    if len(args) == 4:
-        proxy_user, proxy_pass, proxy_host, proxy_port = args
+    chromedriver_path = "/usr/bin/chromedriver"  # замените, если ваш путь другой
+    chrome_options = Options()
+
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
+    chrome_options.add_experimental_option("detach", True)
+
+    if fullscreen:
+        chrome_options.add_argument("--start-maximized")  # Для полноэкранного режима
     else:
-        pattern = r"^(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$"
-        match = re.match(pattern, args[0])
-        if match:
-            proxy_user = match.group("user")
-            proxy_pass = match.group("password")
-            proxy_host = match.group("host")
-            proxy_port = match.group("port")
+        chrome_options.add_argument(
+            f"--window-size={width},{height}"
+        )  # Для заданного размера
 
-    proxy_port = int(proxy_port)
+    service = Service(chromedriver_path)
 
-    if proxy_host and proxy_port and proxy_user and proxy_pass:
-        plugin_file = create_proxyauth_extension(
-            proxy_host, proxy_port, proxy_user, proxy_pass
-        )
-        chrome_options = Options()
-        chrome_options.add_extension(plugin_file)
-        driver = webdriver.Chrome(options=chrome_options)
-        if os.path.exists(plugin_file):
-            os.remove(plugin_file)
-
-    else:
-        driver = webdriver.Chrome()
+    driver = webdriver.Chrome(
+        service=service,
+        options=chrome_options,
+        seleniumwire_options=seleniumwire_options,
+    )
 
     return driver

@@ -40,3 +40,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["error", "ignore::pytest.PytestUnraisableExceptionWarning"]
+
+
+[project.optional-dependencies]
+request_utils = ["selenium", "selenium-wire", "paramiko"]
