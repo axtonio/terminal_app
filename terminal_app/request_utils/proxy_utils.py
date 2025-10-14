@@ -4,7 +4,11 @@ from seleniumwire import webdriver
 
 
 def open_driver(
-    proxy: str, fullscreen: bool = True, width: int = 1920, height: int = 1080
+    proxy: str,
+    fullscreen: bool = True,
+    width: int = 1920,
+    height: int = 1080,
+    chromedriver_path: str = "/usr/bin/chromedriver",
 ) -> webdriver.Chrome:
 
     proxy_auth = f"http://{proxy}"
@@ -17,7 +21,6 @@ def open_driver(
         }
     }
 
-    chromedriver_path = "/usr/bin/chromedriver"  # замените, если ваш путь другой
     chrome_options = Options()
 
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
