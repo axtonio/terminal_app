@@ -237,31 +237,47 @@ def _parse_env_file(env_file_path: Path) -> dict[str, Any]:
     """
     Парсинг ключ=значение из .env-файлов.
     """
-    data = {}
-    with open(env_file_path) as f:
-        for line in f.readlines():
-            line = line.strip()
-            if not line.startswith("#") and line:
-                name = line[: line.find("=")].strip().strip('"').strip("'")
-                arg = line[line.find("=") + 1 :].strip().strip('"').strip("'")
-                data[name] = arg
-
+    try:
+        data = {}
+        with open(env_file_path) as f:
+            for line in f.readlines():
+                line = line.strip()
+                if not line.startswith("#") and line:
+                    name = line[: line.find("=")].strip().strip('"').strip("'")
+                    arg = line[line.find("=") + 1 :].strip().strip('"').strip("'")
+                    data[name] = arg
+    except Exception:
+        TERMINAL_APP_LOGGER.error(f"Error parsing {env_file_path}")
+        return {}
     return data
 
 
 def _parse_yaml_file(yaml_file_path: Path) -> dict[str, Any]:
-    with initialize_config_dir(
-        config_dir=yaml_file_path.parent.as_posix(),
-        job_name="terminal_app",
-        version_base=None,
-    ):
-        cfg_name = yaml_file_path.stem
+    try:
+        with initialize_config_dir(
+            config_dir=yaml_file_path.parent.as_posix(),
+            job_name="terminal_app",
+            version_base=None,
+        ):
+            cfg_name = yaml_file_path.stem
 
-        conf = compose(config_name=cfg_name)
+            conf = compose(config_name=cfg_name)
 
-    conf_dict: dict[str, Any] = OmegaConf.to_container(conf, resolve=True)  # type: ignore
+        conf_dict: dict[str, Any] = OmegaConf.to_container(conf, resolve=True)  # type: ignore
+    except Exception:
+        TERMINAL_APP_LOGGER.error(f"Error parsing {yaml_file_path}")
+        return {}
     return conf_dict
 
+def _parse_json_file(json_file_path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(
+            json_file_path.read_text()
+        )
+    except Exception:
+        TERMINAL_APP_LOGGER.error(f"Error parsing {json_file_path}")
+        return {}
+    return data
 
 def _show_env_info(env_file_path: Path) -> str:
     """
@@ -273,7 +289,7 @@ def _show_env_info(env_file_path: Path) -> str:
     if env_file_path.suffix in (".yml", ".yaml"):
         data: dict[str, Any] = _parse_yaml_file(env_file_path)
     elif env_file_path.suffix == ".json":
-        data = json.loads(env_file_path.read_text())
+        data = _parse_json_file(env_file_path)
     else:
         data = _parse_env_file(env_file_path)
 
@@ -398,7 +414,7 @@ def source(
     def load_json_file(json_file_path: Path) -> None:
         nonlocal data
 
-        conf_dict = json.loads(json_file_path.read_text())
+        conf_dict = _parse_json_file(json_file_path)
 
         if json_file_path.name.startswith("."):
             for k, v in conf_dict.items():
