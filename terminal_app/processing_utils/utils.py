@@ -91,8 +91,9 @@ def save_meta_callback(
         ],
     ],
     output_path: Path | str,
+    stage_index: int = -1,
 ):
-    meta: list[Any] = [m for _, m in list(stages.values())[-1][1]]
+    meta: list[Any] = [m for _, m in list(stages.values())[stage_index][1]]
 
     Path(output_path).write_text(
         json.dumps(meta, indent=2, ensure_ascii=False, default=json_default)
@@ -255,6 +256,7 @@ def dataset_stats(
             json.dumps(
                 {p.as_posix(): e for p, e in failed_files_with_error.items()},
                 indent=2,
+                ensure_ascii=False,
                 default=json_default,
             )
         )
