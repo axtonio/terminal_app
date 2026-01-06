@@ -2,6 +2,7 @@ from .decorators import classproperty, coroutine, get_params, safety_call, set_p
 from .stdout_utils import AttentionPrint, TerminalAppFormatting, kill_all_output
 from .utils import (
     AllParams,
+    annotations_to_path_list,
     chunks,
     code_is_valid,
     fast_copy,
@@ -10,6 +11,8 @@ from .utils import (
     is_regex_pattern,
     random_day,
     random_string,
+    recursive_map,
+    to_relative,
 )
 
 __all__ = [
@@ -22,6 +25,7 @@ __all__ = [
     "TerminalAppFormatting",
     "kill_all_output",
     "AllParams",
+    "annotations_to_path_list",
     "chunks",
     "code_is_valid",
     "fast_copy",
@@ -30,4 +34,6 @@ __all__ = [
     "is_regex_pattern",
     "random_day",
     "random_string",
+    "recursive_map",
+    "to_relative",
 ]

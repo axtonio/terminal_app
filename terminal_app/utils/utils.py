@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import concurrent.futures
+import glob
+import json
 import multiprocessing as mp
 import os
 import random
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Sequence, TypeVar, overload
 
 import tqdm
+from natsort import natsorted, ns
 
 from terminal_app.logging import TERMINAL_APP_LOGGER
 
@@ -180,3 +183,99 @@ def fast_copy(
                     TERMINAL_APP_LOGGER.error(f"Copy failed: {e}")
                 finally:
                     pbar.update(1)
+
+
+def annotations_to_path_list(
+    annotations: Path | str | Sequence[Path | str],
+) -> list[Path]:
+
+    def _has_glob_tokens(text: Any) -> bool:
+        text = str(text)
+        return any(token in text for token in ("*", "?", "[", "]"))
+
+    def _resolve_mesh_path(entry: str, base_dir: Path) -> str:
+        path = Path(entry)
+        if not path.is_absolute():
+            path = base_dir / path
+        return path.as_posix()
+
+    if isinstance(annotations, Sequence) and not isinstance(annotations, str):
+        result = []
+        for item in annotations:
+            result.extend(annotations_to_path_list(item))
+        return result
+
+    candidate = Path(annotations)
+    if candidate.exists() and not _has_glob_tokens(annotations):
+        if candidate.suffix.lower() == ".json":
+            base_dir = candidate.parent
+            annotations = json.loads(candidate.read_text(encoding="utf-8"))
+        else:
+            base_dir = Path.cwd()
+            annotations = [str(annotations)]
+        if not isinstance(annotations, list):
+            raise TypeError(
+                f"Annotation file {candidate} must contain a JSON array or newline list"
+            )
+        resolved = [
+            Path(_resolve_mesh_path(str(item), base_dir))
+            for item in annotations
+            if isinstance(item, (str, Path))
+        ]
+        if not resolved:
+            raise ValueError(f"No mesh paths could be resolved from {candidate}")
+        return resolved
+
+    matches = glob.glob(str(annotations))
+    if not matches:
+        raise FileNotFoundError(
+            f"No meshes found using annotation pattern {annotations!r}"
+        )
+    return natsorted([Path(match) for match in matches], alg=ns.IGNORECASE)
+
+
+def recursive_map(data: Any, func: Callable[[Any], Any]) -> Any:
+    if isinstance(data, dict):
+        return {recursive_map(k, func): recursive_map(v, func) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return [recursive_map(x, func) for x in data]
+    return func(data)
+
+
+def to_relative(data: Any, root: Path | str, reverse: bool = False) -> Any:
+    root = Path(root).resolve()
+
+    def _resolve_path(p: Path | str) -> str:
+        p_obj = Path(p)
+        if p_obj.is_absolute():
+            return p_obj.as_posix()
+        return (root / p).resolve().as_posix()
+
+    def _make_relative(p: Path | str) -> str:
+        try:
+            return (
+                Path("{json_path}") / os.path.relpath(Path(p).resolve(), root)
+            ).as_posix()
+        except ValueError:
+            return Path(p).as_posix()
+
+    def _process_item(obj: Any) -> Any:
+        if isinstance(obj, Path):
+
+            return _resolve_path(obj) if reverse else _make_relative(obj)
+
+        if isinstance(obj, str):
+            try:
+                if reverse:
+                    resolved = (root / obj).resolve()
+                    if not Path(obj).is_absolute() and resolved.exists():
+                        return resolved.as_posix()
+                else:
+                    if Path(obj).exists():
+                        return _make_relative(obj)
+            except Exception:
+                return obj
+
+        return obj
+
+    return recursive_map(data, _process_item)

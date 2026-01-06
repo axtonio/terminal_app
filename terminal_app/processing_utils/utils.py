@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import pickle
 from collections import defaultdict
@@ -7,11 +8,18 @@ from typing import Any, Callable
 
 import numpy as np
 
-from terminal_app.utils import filter_by_regex, is_regex_pattern
+from terminal_app.utils import filter_by_regex, is_regex_pattern, to_relative
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 
 
-def json_default(obj):
-    """Custom JSON serializer for objects not serializable by default."""
+def _json_default(obj: Any) -> str:
+
     if isinstance(obj, Path):
         return obj.as_posix()
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
@@ -78,7 +86,7 @@ def save_pickle_callback(
         )
 
     Path(output_path).write_bytes(pickle.dumps(result))
-    print(f"Save {output_path}")
+    logger.info(f"Save {output_path}")
 
 
 def save_meta_callback(
@@ -92,20 +100,28 @@ def save_meta_callback(
     ],
     output_path: Path | str,
     stage_index: int = -1,
+    filtered_only: bool = False,
+    relative: bool = False,
 ):
-    meta: list[Any] = [m for _, m in list(stages.values())[stage_index][1]]
+    meta: list[Any] = [
+        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]  # type: ignore
+    ]
 
     Path(output_path).write_text(
-        json.dumps(meta, indent=2, ensure_ascii=False, default=json_default)
+        json.dumps(
+            (meta if not relative else to_relative(meta, Path(output_path).parent)),
+            indent=2,
+            ensure_ascii=False,
+            default=_json_default,
+        )
     )
-    print(f"Save {output_path}")
+    logger.info(f"Save {output_path}")
 
 
 def find_closest_path(values, target_value, paths):
     if not values or not paths:
         return None
 
-    # Находим индекс ближайшего значения
     differences = [abs(value - target_value) for value in values]
     closest_idx = np.argmin(differences)
     return paths[closest_idx]
@@ -119,7 +135,6 @@ def calculate_stats(
 
     values_dict: dict[str, list[tuple[str, float | bool]]] = defaultdict(lambda: [])
 
-    # Собираем значения для каждого поля
     field_configs = field_configs.copy()
     field_configs_copy = field_configs.copy()
     for path, data in data_list:
@@ -147,13 +162,24 @@ def calculate_stats(
         config = field_configs[field]
         values = [v for _, v in items]
         paths = [p for p, _ in items]
+        store_examples = config.get("store_examples", False)
 
         if not values:
             continue
+
+        min_idx = np.argmin(values)
+        max_idx = np.argmax(values)
         if field.startswith("is_"):
             result[f"{field}_count"] = int(sum(values))
             result[f"{field}_ratio"] = float(sum(values) / count)
 
+            if store_examples:
+
+                if min_idx == max_idx and values[max_idx] == 0.0:
+                    continue
+                result["examples"][field] = (
+                    paths[max_idx] if paths[max_idx] else "unknown"
+                )
         else:
             mean_val = float(np.mean(values))
             median_val = float(np.median(values))
@@ -178,10 +204,8 @@ def calculate_stats(
             result[f"{field}_quantile_75"] = quantile_75
             result[f"{field}_quantile_90"] = quantile_90
 
-        if config.get("store_examples", False):
-            min_idx = np.argmin(values)
-            max_idx = np.argmax(values)
-            if not field.startswith("is_"):
+            if store_examples:
+
                 if min_idx == max_idx:
                     continue
                 result["examples"][f"min_{field}"] = (
@@ -205,12 +229,6 @@ def calculate_stats(
                 )
                 result["examples"][f"quantile_90_{field}"] = find_closest_path(
                     values, quantile_90, paths
-                )
-            else:
-                if min_idx == max_idx and values[max_idx] == 0.0:
-                    continue
-                result["examples"][field] = (
-                    paths[max_idx] if paths[max_idx] else "unknown"
                 )
 
     return result
@@ -249,17 +267,28 @@ def dataset_stats(
     failed_output: Path | str | None = None,
     stat_output: Path | str | None = None,
     stdout: Callable | None = None,
+    relative: bool = False,
 ):
     failed_files_with_error = list(stages.values())[-1][2]
     if failed_output:
+
         Path(failed_output).write_text(
             json.dumps(
-                {p.as_posix(): e for p, e in failed_files_with_error.items()},
+                (
+                    {p.as_posix(): e for p, e in failed_files_with_error.items()}
+                    if not relative
+                    else to_relative(
+                        {p.as_posix(): e for p, e in failed_files_with_error.items()},
+                        Path(failed_output).parent,
+                    )
+                ),
                 indent=2,
                 ensure_ascii=False,
-                default=json_default,
+                default=_json_default,
             )
         )
+        if stdout:
+            stdout(f"Save {failed_output}")
 
     stat_dict = {}
 
@@ -267,14 +296,11 @@ def dataset_stats(
         for stage_name, stat_func in stage_stats.items():
             stat_func(stages, stage_name, stat_dict)
 
-    # Статистика по ошибкам
     failed_files = list(failed_files_with_error.keys())
     stat_dict["errors"] = {
         k: {
             "count": int(v),
-            "example": (
-                failed_files[i].as_posix() if i < len(failed_files) else "unknown"
-            ),
+            "example": (failed_files[i] if i < len(failed_files) else "unknown"),
         }
         for k, i, v in zip(
             *np.unique(
@@ -286,13 +312,23 @@ def dataset_stats(
     }
 
     if stat_output:
+
         Path(stat_output).write_text(
-            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=json_default)
+            json.dumps(
+                (
+                    stat_dict
+                    if not relative
+                    else to_relative(stat_dict, Path(stat_output).parent)
+                ),
+                indent=2,
+                ensure_ascii=False,
+                default=_json_default,
+            )
         )
 
     if stdout:
         stdout(
-            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=json_default)
+            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=_json_default)
         )
         stdout(f"Save {stat_output}")
     return stat_dict

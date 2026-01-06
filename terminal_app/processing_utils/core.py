@@ -3,11 +3,11 @@ import os
 import queue
 import time
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Sequence
 
 from tqdm import tqdm
 
-from terminal_app.utils import kill_all_output
+from terminal_app.utils import annotations_to_path_list, kill_all_output
 
 
 def _list_cuda_devices():
@@ -123,26 +123,27 @@ def worker(
     task_queue: mp.Queue,
     result_queue: mp.Queue,
     worker_id: int,
-    without_logging: bool,
+    logging: bool,
     safety: bool,
     filter_one: Callable[
         [str, dict[str, Any], str], tuple[Path | str, dict[str, Any], str | None, bool]
     ],
     error_stdout: Callable[[Any], Any],
 ):
-    if without_logging:
+    if not logging:
         kill_all_output()
 
-    # Подготовим локальный контекст для дочерних подпроцессов ТОЛЬКО если запрошен 'fork'
-    if safety:
-        fork_ctx = mp.get_context("fork")
+    fork_ctx = None
 
     while True:
+        task = None
         try:
             task = task_queue.get(timeout=300)
 
             if safety:
-                # Локальный подпроцесс через fork — быстро и дёшево
+                if fork_ctx is None:
+                    fork_ctx = mp.get_context("fork")
+
                 result_q = fork_ctx.Queue()
 
                 def worker_function(queue: mp.Queue, *args):
@@ -193,7 +194,8 @@ def worker(
         except queue.Empty:
             break
         except Exception as e:
-            error_stdout(f"Worker {worker_id} failed: {str(e)}, {task[0]}")
+            task_file = task[0] if task else None
+            error_stdout(f"Worker {worker_id} failed: {str(e)}, {task_file}")
 
 
 def process_files(
@@ -205,11 +207,10 @@ def process_files(
     ],
     desc: str,
     max_workers: int | None = None,
-    root_folder: Path | None = None,
-    pattern: str | None = None,
+    annotations: Path | str | Sequence[Path | str] | None = None,
     override_files: list[tuple[Path, dict[str, Any]]] | None = None,
     safety: bool = False,
-    without_logging: bool = False,
+    logging: bool = True,
     start_method: Literal["fork", "spawn"] | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
     error_stdout: Callable[[Any], Any] = _stdout,
@@ -238,13 +239,8 @@ def process_files(
     if override_files:
         filtered_files = override_files
 
-    if (
-        all_files is None
-        and filtered_files is None
-        and pattern is not None
-        and root_folder is not None
-    ):
-        filtered_files = [(p, {}) for p in root_folder.rglob(pattern)]
+    if all_files is None and filtered_files is None and annotations is not None:
+        filtered_files = [(p, {}) for p in annotations_to_path_list(annotations)]
     elif filtered_files is None:
         raise Exception("There are no matching files")
 
@@ -256,16 +252,14 @@ def process_files(
         for file, meta in filtered_files:
             q.put((str(file), meta, "cpu"))
     else:
-        # НЕ импортируем torch в родителе без нужды
+        # lazy import
         cuda_devices = _list_cuda_devices()
         if not cuda_devices:
             raise RuntimeError("No CUDA devices found or visible")
         for ind, (file, meta) in enumerate(filtered_files):
             q.put((str(file), meta, cuda_devices[ind % len(cuda_devices)]))
-
     processes: list[mp.Process] = []
 
-    # Если device='cuda', не создаём больше процессов, чем GPU (по желанию)
     if device == "cuda":
         try:
             n_devices = len(_list_cuda_devices())
@@ -276,23 +270,20 @@ def process_files(
         max_workers = min(max_workers, mp.cpu_count())
 
     max_workers = min(max_workers, total)
-
     for i in range(max_workers):
         p = ctx.Process(  # type: ignore
             target=worker,
-            args=(q, progress_q, i, without_logging, safety, filter_one, error_stdout),
+            args=(q, progress_q, i, logging, safety, filter_one, error_stdout),
         )
         p.start()
         processes.append(p)
-
     all_files_with_meta: list[tuple[Path, dict[str, Any]]] = []
     filtered_files_with_meta: list[tuple[Path, dict[str, Any]]] = []
-
     with tqdm(total=total, desc=desc) as pbar:
         completed = 0
         while completed < total:
             try:
-                file, meta, error, passed = progress_q.get(timeout=300)
+                file, meta, error, passed = progress_q.get(timeout=15)
                 all_files_with_meta.append((file, meta))
                 if error:
                     errors[file] = error
@@ -304,14 +295,12 @@ def process_files(
                 if all(not p.is_alive() for p in processes):
                     break
 
-    # Корректно завершаем процессы
     for p in processes:
         if p.is_alive():
             p.terminate()
         p.join(timeout=5)
         if p.is_alive():
             p.kill()
-
     if postprocessing_func:
         all_files_with_meta, filtered_files_with_meta, errors = postprocessing_func(
             all_files_with_meta, filtered_files_with_meta, errors
