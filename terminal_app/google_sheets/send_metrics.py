@@ -242,6 +242,15 @@ def process_document(
     return f'=HYPERLINK("{view_link}", "{file_name}")'
 
 
+def process_link(
+    drive_service,
+    local_path: str,
+    filename_extractor: Callable[[str], str] = lambda x: Path(x).name,
+) -> str:
+
+    return f'=HYPERLINK("{local_path}", "{filename_extractor(local_path)}")'
+
+
 def process_google_document(
     drive_service,
     local_path: str,
@@ -267,6 +276,7 @@ FILE_TYPE_REGISTRY = {
     "image": process_image,
     "document": process_document,
     "google_document": process_google_document,
+    "link": process_link,
 }
 
 
@@ -299,7 +309,7 @@ def set_with_dataframe_and_images(
                 for idx in df.index:
                     local_path = df.at[idx, col_name]
 
-                    if isinstance(local_path, str) and Path(local_path).exists():
+                    if isinstance(local_path, str):
                         try:
                             df.at[idx, col_name] = handler(
                                 drive_service, local_path, **kwargs
