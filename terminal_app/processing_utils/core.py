@@ -1,5 +1,4 @@
 import multiprocessing as mp
-import os
 import queue
 import time
 from pathlib import Path
@@ -7,21 +6,11 @@ from typing import Any, Callable, Literal, Sequence
 
 from tqdm import tqdm
 
-from terminal_app.utils import annotations_to_path_list, kill_all_output
-
-
-def _list_cuda_devices():
-    vis = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if vis is not None:
-        ids = [x for x in vis.split(",") if x.strip() != ""]
-        if len(ids) > 0:
-            return [f"cuda:{i}" for i in range(len(ids))]
-    try:
-        import torch  # type: ignore
-
-        return [f"cuda:{i}" for i in range(torch.cuda.device_count())]
-    except Exception:
-        return []
+from terminal_app.utils import (
+    annotations_to_path_list,
+    kill_all_output,
+    list_cuda_devices,
+)
 
 
 def _stdout(x):
@@ -129,6 +118,8 @@ def worker(
         [str, dict[str, Any], str], tuple[Path | str, dict[str, Any], str | None, bool]
     ],
     error_stdout: Callable[[Any], Any],
+    task_timeout: int = 300,
+    process_timeout: int = 120,
 ):
     if not logging:
         kill_all_output()
@@ -138,7 +129,7 @@ def worker(
     while True:
         task = None
         try:
-            task = task_queue.get(timeout=300)
+            task = task_queue.get(timeout=task_timeout)
 
             if safety:
                 if fork_ctx is None:
@@ -155,7 +146,7 @@ def worker(
                 failed_reason = ""
                 try:
                     p.start()
-                    p.join(timeout=50)
+                    p.join(timeout=process_timeout)
 
                     try:
                         result = result_q.get(timeout=1)
@@ -164,7 +155,7 @@ def worker(
 
                     if p.is_alive():
                         p.terminate()
-                        p.join(timeout=50)
+                        p.join(timeout=process_timeout)
 
                         if p.is_alive():
                             p.kill()
@@ -214,6 +205,7 @@ def process_files(
     start_method: Literal["fork", "spawn"] | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
     error_stdout: Callable[[Any], Any] = _stdout,
+    info_stdout: Callable[[Any], Any] = _stdout,
     postprocessing_func: (
         Callable[
             [
@@ -236,6 +228,8 @@ def process_files(
     if max_workers is None:
         max_workers = mp.cpu_count()
 
+    info_stdout(f"Starting processing with {max_workers} workers")
+
     if override_files:
         filtered_files = override_files
 
@@ -253,7 +247,7 @@ def process_files(
             q.put((str(file), meta, "cpu"))
     else:
         # lazy import
-        cuda_devices = _list_cuda_devices()
+        cuda_devices = list_cuda_devices()
         if not cuda_devices:
             raise RuntimeError("No CUDA devices found or visible")
         for ind, (file, meta) in enumerate(filtered_files):
@@ -262,7 +256,7 @@ def process_files(
 
     if device == "cuda":
         try:
-            n_devices = len(_list_cuda_devices())
+            n_devices = len(list_cuda_devices())
             max_workers = min(max_workers, max(1, n_devices))
         except Exception:
             pass

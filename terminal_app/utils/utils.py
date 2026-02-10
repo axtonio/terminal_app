@@ -23,6 +23,25 @@ from terminal_app.logging import TERMINAL_APP_LOGGER
 T = TypeVar("T")
 
 
+def cuda_count() -> int:
+    vis = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if vis is not None:
+        ids = [x for x in vis.split(",") if x.strip() != ""]
+        if len(ids) > 0:
+            return len(ids)
+    try:
+        import torch  # type: ignore
+
+        return torch.cuda.device_count()
+    except Exception:
+        return 0
+
+
+def list_cuda_devices():
+
+    return [f"cuda:{i}" for i in range(cuda_count())]
+
+
 def code_is_valid(code: str):
     try:
         ast.parse(code)
