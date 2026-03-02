@@ -102,10 +102,29 @@ def save_meta_callback(
     stage_index: int = -1,
     filtered_only: bool = False,
     relative: bool = False,
+    for_each_file: bool = False,
 ):
     meta: list[Any] = [
-        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]  # type: ignore
+        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]
     ]
+
+    if for_each_file:
+        for file, meta_file in list(stages.values())[stage_index][
+            0 if not filtered_only else 1
+        ]:
+            output_json_path = file.with_name(f"{file.stem}_meta.json")
+            Path(output_json_path).write_text(
+                json.dumps(
+                    (
+                        meta_file
+                        if not relative
+                        else to_relative(meta_file, Path(output_json_path).parent)
+                    ),
+                    indent=2,
+                    ensure_ascii=False,
+                    default=_json_default,
+                )
+            )
 
     Path(output_path).write_text(
         json.dumps(
