@@ -205,7 +205,7 @@ def fast_copy(
 
 
 def annotations_to_path_list(
-    annotations: Path | str | Sequence[Path | str],
+    annotations: Path | str | Sequence[Path | str], read_json: bool = False
 ) -> list[Path]:
 
     def _has_glob_tokens(text: Any) -> bool:
@@ -226,7 +226,7 @@ def annotations_to_path_list(
 
     candidate = Path(annotations)
     if candidate.exists() and not _has_glob_tokens(annotations):
-        if candidate.suffix.lower() == ".json":
+        if candidate.suffix.lower() == ".json" and read_json:
             base_dir = candidate.parent
             annotations = json.loads(candidate.read_text(encoding="utf-8"))
         else:

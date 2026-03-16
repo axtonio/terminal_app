@@ -98,8 +98,8 @@ def run_stages(
                 *stages_result[stage_name]
             )
 
-    stdout("Do callbacks")
     if callbacks:
+        stdout("Do callbacks")
         for cb_name, cb_fn in callbacks.items():
             stdout(cb_name)
             start = time.time()
