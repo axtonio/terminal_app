@@ -4,6 +4,7 @@ import ast
 import concurrent.futures
 import glob
 import json
+import logging
 import multiprocessing as mp
 import os
 import random
@@ -22,6 +23,13 @@ from terminal_app.logging import TERMINAL_APP_LOGGER
 
 T = TypeVar("T")
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 def cuda_count() -> int:
     vis = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -33,7 +41,32 @@ def cuda_count() -> int:
         import torch  # type: ignore
 
         return torch.cuda.device_count()
-    except Exception:
+    except Exception as ex:
+        logger.warning(
+            f"Error getting CUDA count with torch: {ex}. Trying nvidia-smi..."
+        )
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "--list-gpus"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            n_gpus = len([line for line in result.stdout.splitlines() if "GPU" in line])
+            if n_gpus > 0:
+                return n_gpus
+
+        logger.warning(
+            f"nvidia-smi did not run successfully: {result.stderr}. Returning 0."
+        )
+        return 0
+    except Exception as ex:
+        logger.warning(f"Error getting CUDA count with nvidia-smi: {ex}. Returning 0.")
         return 0
 
 
