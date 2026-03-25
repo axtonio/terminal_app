@@ -97,6 +97,8 @@ def run_stages(
             all_files, filtered_files, errors = transitions[stage_name](
                 *stages_result[stage_name]
             )
+        else:
+            all_files, filtered_files, errors = stages_result[stage_name]
 
     if callbacks:
         stdout("Do callbacks")
@@ -204,6 +206,7 @@ def process_files(
     logging: bool = True,
     start_method: Literal["fork", "spawn"] | None = None,
     device: Literal["cuda", "cpu"] = "cpu",
+    read_json: bool = False,
     error_stdout: Callable[[Any], Any] = _stdout,
     info_stdout: Callable[[Any], Any] = _stdout,
     postprocessing_func: (
@@ -234,7 +237,9 @@ def process_files(
         filtered_files = override_files
 
     if all_files is None and filtered_files is None and annotations is not None:
-        filtered_files = [(p, {}) for p in annotations_to_path_list(annotations)]
+        filtered_files = [
+            (p, {}) for p in annotations_to_path_list(annotations, read_json=read_json)
+        ]
     elif filtered_files is None:
         raise Exception("There are no matching files")
 
@@ -295,6 +300,7 @@ def process_files(
         p.join(timeout=5)
         if p.is_alive():
             p.kill()
+
     if postprocessing_func:
         all_files_with_meta, filtered_files_with_meta, errors = postprocessing_func(
             all_files_with_meta, filtered_files_with_meta, errors

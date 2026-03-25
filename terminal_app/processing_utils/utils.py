@@ -108,12 +108,13 @@ def save_meta_callback(
     filtered_only: bool = False,
     relative: bool = False,
     for_each_file: bool = False,
+    replace_if_exists: bool = False,
     each_file_output_path: Callable[[Path], Path] | None = None,
 ):
     meta: list[Any] = [
         m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]
     ]
-
+    errors = list(stages.values())[stage_index][2]
     if for_each_file:
         for file, meta_file in list(stages.values())[stage_index][
             0 if not filtered_only else 1
@@ -123,6 +124,13 @@ def save_meta_callback(
                 if each_file_output_path
                 else _default_each_file_output_path(file)
             )
+            if not replace_if_exists and output_json_path.exists():
+                continue
+
+            if not meta_file:
+                if file in errors:
+                    meta_file["error"] = errors[file]
+
             os.makedirs(output_json_path.parent, exist_ok=True)
             Path(output_json_path).write_text(
                 json.dumps(
