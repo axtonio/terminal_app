@@ -110,7 +110,7 @@ def run_stages(
             stdout(f"{cb_name} duration: {end-start}s")
 
 
-def worker(
+def _worker(
     task_queue: mp.Queue,
     result_queue: mp.Queue,
     worker_id: int,
@@ -120,8 +120,8 @@ def worker(
         [str, dict[str, Any], str], tuple[Path | str, dict[str, Any], str | None, bool]
     ],
     error_stdout: Callable[[Any], Any],
-    task_timeout: int = 300,
-    process_timeout: int = 120,
+    task_timeout: int,
+    process_timeout: int,
 ):
     if not logging:
         kill_all_output()
@@ -224,6 +224,8 @@ def process_files(
         ]
         | None
     ) = None,
+    task_timeout: int = 300,
+    process_timeout: int = 120,
 ):
 
     assert not (safety and device == "cuda"), "Safety mode work only on cpu"
@@ -271,8 +273,18 @@ def process_files(
     max_workers = min(max_workers, total)
     for i in range(max_workers):
         p = ctx.Process(  # type: ignore
-            target=worker,
-            args=(q, progress_q, i, logging, safety, filter_one, error_stdout),
+            target=_worker,
+            args=(
+                q,
+                progress_q,
+                i,
+                logging,
+                safety,
+                filter_one,
+                error_stdout,
+                task_timeout,
+                process_timeout,
+            ),
         )
         p.start()
         processes.append(p)
