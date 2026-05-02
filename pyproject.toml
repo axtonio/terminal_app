@@ -11,6 +11,7 @@ keywords = ["terminal_app", "mipt"]
 dependencies = [
 	"tqdm",
 	"certifi",
+	"natsort",
 	"pydantic",
 	"tabulate",
 	"paramiko",
