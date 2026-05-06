@@ -1,6 +1,7 @@
 import multiprocessing as mp
 import queue
 import time
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence
 
@@ -12,102 +13,87 @@ from terminal_app.utils import (
     list_cuda_devices,
 )
 
+from .types import ErrorsDict, FilesWithMeta, PipesResult, StageResult
+
 
 def _stdout(x):
     return
 
 
+class Callback(ABC):
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def __call__(self, stages_result: PipesResult, stage_name: str | None) -> None:
+        pass
+
+
+class Stage(ABC):
+
+    callbacks: list[Callback] = []
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def __call__(self, filtered_files: FilesWithMeta | None) -> StageResult:
+        pass
+
+    def transition(
+        self,
+        all_files: FilesWithMeta,
+        filtered_files: FilesWithMeta,
+        errors: ErrorsDict,
+    ) -> StageResult:
+        return all_files, filtered_files, errors
+
+
 def run_stages(
-    stages: dict[
-        str,
-        Callable[
-            [
-                list[tuple[Path, dict[str, Any]]] | None,
-                list[tuple[Path, dict[str, Any]]] | None,
-                dict[Path, str],
-            ],
-            tuple[
-                list[tuple[Path, dict[str, Any]]],
-                list[tuple[Path, dict[str, Any]]],
-                dict[Path, str],
-            ],
-        ],
-    ],
-    transitions: (
-        dict[
-            str,
-            Callable[
-                [
-                    list[tuple[Path, dict[str, Any]]],
-                    list[tuple[Path, dict[str, Any]]],
-                    dict[Path, str],
-                ],
-                tuple[
-                    list[tuple[Path, dict[str, Any]]],
-                    list[tuple[Path, dict[str, Any]]],
-                    dict[Path, str],
-                ],
-            ],
-        ]
-        | None
-    ) = None,
-    callbacks: (
-        dict[
-            str,
-            Callable[
-                [
-                    dict[
-                        str,
-                        tuple[
-                            list[tuple[Path, dict[str, Any]]],
-                            list[tuple[Path, dict[str, Any]]],
-                            dict[Path, str],
-                        ],
-                    ]
-                ],
-                Any,
-            ],
-        ]
-        | None
-    ) = None,
+    stages: Sequence[Stage],
+    callbacks: Sequence[Callback] | None = None,
     stdout: Callable[[Any], Any] = _stdout,
 ):
 
-    all_files: list[tuple[Path, dict[str, Any]]] | None = None
-    filtered_files: list[tuple[Path, dict[str, Any]]] | None = None
-    errors: dict[Path, str] = {}
-    stages_result: dict[
-        str,
-        tuple[
-            list[tuple[Path, dict[str, Any]]],
-            list[tuple[Path, dict[str, Any]]],
-            dict[Path, str],
-        ],
-    ] = {}
+    all_files: FilesWithMeta | None = None
+    filtered_files: FilesWithMeta | None = None
+    errors: ErrorsDict = {}
+    stages_result: PipesResult = {}
 
-    for stage_name, stage in stages.items():
+    for stage in stages:
 
-        stdout(stage_name)
+        stdout(f"Do {stage.name} stage")
         start = time.time()
-        stages_result[stage_name] = stage(all_files, filtered_files, errors)
+        all_files, filtered_files, errors = stage(filtered_files)
+        stages_result[stage.name] = (all_files, filtered_files, errors)
         end = time.time()
-        stdout(f"{stage_name} duration: {end-start}s")
+        stdout(f"{stage.name} stage duration: {end-start}s")
 
-        if transitions and transitions.get(stage_name):
-            all_files, filtered_files, errors = transitions[stage_name](
-                *stages_result[stage_name]
-            )
-        else:
-            all_files, filtered_files, errors = stages_result[stage_name]
+        stdout("Do stage callbacks")
+        for callback in stage.callbacks:
+            stdout(f"Do {callback.name} callback")
+            start = time.time()
+            callback(stages_result, stage.name)
+            end = time.time()
+            stdout(f"{callback.name} callback duration: {end-start}s")
+
+        all_files, filtered_files, errors = stage.transition(
+            all_files, filtered_files, errors
+        )
 
     if callbacks:
-        stdout("Do callbacks")
-        for cb_name, cb_fn in callbacks.items():
-            stdout(cb_name)
+        stdout("Do final callbacks after all stages")
+        for callback in callbacks:
+            stdout(f"Do {callback.name} callback")
             start = time.time()
-            cb_fn(stages_result)
+            callback(stages_result, None)
             end = time.time()
-            stdout(f"{cb_name} duration: {end-start}s")
+            stdout(f"{callback.name} callback duration: {end-start}s")
 
 
 def _worker(
@@ -192,9 +178,7 @@ def _worker(
 
 
 def process_files(
-    all_files: list[tuple[Path, dict[str, Any]]] | None,
     filtered_files: list[tuple[Path, dict[str, Any]]] | None,
-    errors: dict[Path, str],
     filter_one: Callable[
         [str, dict[str, Any], str], tuple[Path | str, dict[str, Any], str | None, bool]
     ],
@@ -238,7 +222,7 @@ def process_files(
     if override_files:
         filtered_files = override_files
 
-    if all_files is None and filtered_files is None and annotations is not None:
+    if filtered_files is None and annotations is not None:
         filtered_files = [
             (p, {}) for p in annotations_to_path_list(annotations, read_json=read_json)
         ]
@@ -290,6 +274,7 @@ def process_files(
         processes.append(p)
     all_files_with_meta: list[tuple[Path, dict[str, Any]]] = []
     filtered_files_with_meta: list[tuple[Path, dict[str, Any]]] = []
+    errors: dict[Path, str] = {}
     with tqdm(total=total, desc=desc) as pbar:
         completed = 0
         while completed < total:

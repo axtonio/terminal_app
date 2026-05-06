@@ -331,3 +331,10 @@ def to_relative(data: Any, root: Path | str, reverse: bool = False) -> Any:
         return obj
 
     return recursive_map(data, _process_item)
+
+
+def link_file(link: Path, output_path: Path):
+    if output_path.exists() or output_path.is_symlink():
+        output_path.unlink()
+
+    os.symlink(link, output_path)

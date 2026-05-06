@@ -10,6 +10,7 @@ from .utils import (
     filter_by_regex,
     get_path,
     is_regex_pattern,
+    link_file,
     list_cuda_devices,
     random_day,
     random_string,
@@ -40,4 +41,5 @@ __all__ = [
     "random_string",
     "recursive_map",
     "to_relative",
+    "link_file",
 ]

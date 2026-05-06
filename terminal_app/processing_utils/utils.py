@@ -11,6 +11,8 @@ import numpy as np
 
 from terminal_app.utils import filter_by_regex, is_regex_pattern, to_relative
 
+from .types import FilesWithMeta, PipesResult, StageResult
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -26,45 +28,46 @@ def _json_default(obj: Any) -> str:
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
+def construct_relative_file(
+    file: Path, source_folder: Path | None, dest_folder: Path | None, suffix: str
+) -> Path:
+    if not source_folder:
+        relative_file = file.with_name(file.stem + suffix)
+    else:
+        relative_file = file.relative_to(source_folder).with_name(file.stem + suffix)
+    return dest_folder / relative_file if dest_folder else relative_file
+
+
 def files_transition(
-    all_files: list[tuple[Path, dict[str, Any]]],
-    filtered_files: list[tuple[Path, dict[str, Any]]],
+    all_files: FilesWithMeta,
+    filtered_files: FilesWithMeta,
     errors: dict[Path, str],
-    source_folder: Path,
-    dest_folder: Path,
-    dest_suffix: str,
-):
+    construct_relative_file: Callable[[Path], Path],
+) -> StageResult:
+
     def transition(
-        files: list[tuple[Path, dict[str, Any]]],
-        py_folder: Path,
-        stl_folder: Path,
+        files: FilesWithMeta,
     ):
-        result = []
+        result: FilesWithMeta = []
         for file, meta in files:
+            relative_file = construct_relative_file(file)
             result.append(
                 (
-                    stl_folder / file.relative_to(py_folder).with_suffix(dest_suffix),
+                    relative_file,
                     meta,
                 )
             )
         return result
 
     return (
-        transition(all_files, source_folder, dest_folder),
-        transition(filtered_files, source_folder, dest_folder),
+        transition(all_files),
+        transition(filtered_files),
         errors,
     )
 
 
 def save_pickle_callback(
-    stages: dict[
-        str,
-        tuple[
-            list[tuple[Path, dict[str, Any]]],
-            list[tuple[Path, dict[str, Any]]],
-            dict[Path, str],
-        ],
-    ],
+    stages: PipesResult,
     root_folder: Path | None,
     output_path: Path | str,
     mapping: dict[str, str],
@@ -95,28 +98,23 @@ def _default_each_file_output_path(file: Path) -> Path:
 
 
 def save_meta_callback(
-    stages: dict[
-        str,
-        tuple[
-            list[tuple[Path, dict[str, Any]]],
-            list[tuple[Path, dict[str, Any]]],
-            dict[Path, str],
-        ],
-    ],
+    stages: PipesResult,
+    stage_name: str | None,
     output_path: Path | str | None = None,
-    stage_index: int = -1,
     filtered_only: bool = False,
     relative: bool = False,
     for_each_file: bool = False,
     replace_if_exists: bool = False,
+    update_if_exists: bool = True,
     each_file_output_path: Callable[[Path], Path] | None = None,
 ):
+    stage_index = list(stages.keys()).index(stage_name) if stage_name else -1
     meta: list[Any] = [
-        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]
+        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]  # type: ignore
     ]
     errors = list(stages.values())[stage_index][2]
     if for_each_file:
-        for file, meta_file in list(stages.values())[stage_index][
+        for file, file_meta in list(stages.values())[stage_index][  # type: ignore
             0 if not filtered_only else 1
         ]:
             output_json_path = (
@@ -124,27 +122,36 @@ def save_meta_callback(
                 if each_file_output_path
                 else _default_each_file_output_path(file)
             )
-            if not replace_if_exists and output_json_path.exists():
-                continue
+            file_meta_for_update = {}
+            if output_json_path.exists():
+                if not replace_if_exists and not update_if_exists:
+                    continue
+                if update_if_exists:
+                    file_meta_for_update = json.loads(output_json_path.read_text())
 
-            if not meta_file:
+            if not file_meta:
                 if file in errors:
-                    meta_file["error"] = errors[file]
+                    if stage_name:
+                        file_meta[stage_name]["error"] = errors[file]
+                    else:
+                        file_meta["error"] = errors[file]
+
+            file_meta_for_update.update(file_meta)
+            file_meta = file_meta_for_update
 
             os.makedirs(output_json_path.parent, exist_ok=True)
             Path(output_json_path).write_text(
                 json.dumps(
                     (
-                        meta_file
+                        file_meta
                         if not relative
-                        else to_relative(meta_file, Path(output_json_path).parent)
+                        else to_relative(file_meta, Path(output_json_path).parent)
                     ),
                     indent=2,
                     ensure_ascii=False,
                     default=_json_default,
                 )
             )
-
     if output_path:
         Path(output_path).write_text(
             json.dumps(
@@ -274,27 +281,13 @@ def calculate_stats(
 
 
 def dataset_stats(
-    stages: dict[
-        str,
-        tuple[
-            list[tuple[Path, dict[str, Any]]],
-            list[tuple[Path, dict[str, Any]]],
-            dict[Path, str],
-        ],
-    ],
+    stages: PipesResult,
     stage_stats: (
         dict[
             str,
             Callable[
                 [
-                    dict[
-                        str,
-                        tuple[
-                            list[tuple[Path, dict[str, Any]]],
-                            list[tuple[Path, dict[str, Any]]],
-                            dict[Path, str],
-                        ],
-                    ],
+                    PipesResult,
                     str,
                     dict[str, Any],
                 ],
@@ -307,17 +300,44 @@ def dataset_stats(
     stat_output: Path | str | None = None,
     stdout: Callable | None = None,
     relative: bool = False,
+    print_stats: bool = True,
 ):
-    failed_files_with_error = list(stages.values())[-1][2]
-    if failed_output:
 
+    stat_dict = {}
+    stat_dict["errors"] = {}
+    failed_output_data = {}
+
+    if stage_stats:
+        for stage_name, stat_func in stage_stats.items():
+            stat_func(stages, stage_name, stat_dict)
+
+    for stage_name, (_, _, errors) in stages.items():
+        failed_files = list(errors.keys())
+        stat_dict["errors"][stage_name] = {
+            k: {
+                "count": int(v),
+                "example": (failed_files[i] if i < len(failed_files) else "unknown"),
+            }
+            for k, i, v in zip(
+                *np.unique(
+                    np.array(list(errors.values())),
+                    return_index=True,
+                    return_counts=True,
+                )
+            )
+        }
+
+        # Convert Path to string for JSON serialization, _json_default not support keys
+        failed_output_data[stage_name] = {p.as_posix(): e for p, e in errors.items()}
+
+    if failed_output:
         Path(failed_output).write_text(
             json.dumps(
                 (
-                    {p.as_posix(): e for p, e in failed_files_with_error.items()}
+                    failed_output_data
                     if not relative
                     else to_relative(
-                        {p.as_posix(): e for p, e in failed_files_with_error.items()},
+                        failed_output_data,
                         Path(failed_output).parent,
                     )
                 ),
@@ -328,27 +348,6 @@ def dataset_stats(
         )
         if stdout:
             stdout(f"Save {failed_output}")
-
-    stat_dict = {}
-
-    if stage_stats:
-        for stage_name, stat_func in stage_stats.items():
-            stat_func(stages, stage_name, stat_dict)
-
-    failed_files = list(failed_files_with_error.keys())
-    stat_dict["errors"] = {
-        k: {
-            "count": int(v),
-            "example": (failed_files[i] if i < len(failed_files) else "unknown"),
-        }
-        for k, i, v in zip(
-            *np.unique(
-                np.array(list(failed_files_with_error.values())),
-                return_index=True,
-                return_counts=True,
-            )
-        )
-    }
 
     if stat_output:
 
@@ -366,22 +365,18 @@ def dataset_stats(
         )
 
     if stdout:
-        stdout(
-            json.dumps(stat_dict, indent=2, ensure_ascii=False, default=_json_default)
-        )
+        if print_stats:
+            stdout(
+                json.dumps(
+                    stat_dict, indent=2, ensure_ascii=False, default=_json_default
+                )
+            )
         stdout(f"Save {stat_output}")
     return stat_dict
 
 
 def stage_stats(
-    stages: dict[
-        str,
-        tuple[
-            list[tuple[Path, dict[str, Any]]],
-            list[tuple[Path, dict[str, Any]]],
-            dict[Path, str],
-        ],
-    ],
+    stages: PipesResult,
     stage_name: str,
     stats: dict[str, Any],
     field_configs: dict[str, dict[str, bool]],
@@ -389,18 +384,18 @@ def stage_stats(
     stats_key: str,
 ):
 
-    py_files_all = [
+    all_files = [
         (m[file_key], m[stats_key])
         for f, m in stages[stage_name][0]
         if file_key in m and stats_key in m
     ]
-    filtered_py_files = [
+    filtered_files = [
         (m[file_key], m[stats_key])
         for f, m in list(stages.values())[-1][1]
         if file_key in m and stats_key in m
     ]
 
     stats[stats_key] = {
-        f"all_{file_key}": calculate_stats(py_files_all, field_configs),
-        f"filtered_{file_key}": calculate_stats(filtered_py_files, field_configs),
+        f"all_{file_key}": calculate_stats(all_files, field_configs),
+        f"filtered_{file_key}": calculate_stats(filtered_files, field_configs),
     }
