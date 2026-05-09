@@ -2,15 +2,11 @@ import logging
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
-from terminal_app.processing_utils import (
-    FilesWithMeta,
-    Stage,
-    process_files,
-)
 from terminal_app.utils import link_file
 
+from .core import Stage, process_files
 from .stage_utils import (
     CallbackConfig,
     DatasetStatsCallbackConfig,
@@ -21,8 +17,13 @@ from .stage_utils import (
     process_failed_filter,
     process_meta_file,
 )
+from .utils import (
+    FilesWithMeta,
+)
 
 logger = logging.getLogger(__name__)
+
+_StartMethod = Literal["fork", "spawn"]
 
 
 def _process_file_worker_wrapper(
@@ -83,9 +84,13 @@ def _process_file_worker_wrapper(
 def _process_files(
     use_meta: bool,
     meta_suffix: str,
-    worker_wrapper: Callable[[Path], tuple[dict[str, Any], str | None, bool]],
     file_key: str,
     statistics_key: str,
+    worker_wrapper: Callable[[Path], tuple[dict[str, Any], str | None, bool]],
+    start_method: _StartMethod,
+    task_timeout: int,
+    process_timeout: int,
+    safety: bool,
     description: str,
 ):
     return partial(
@@ -100,7 +105,10 @@ def _process_files(
         ),
         desc=description,
         error_stdout=logger.error,
-        start_method="fork",  # Explicitly use fork to avoid serialization issues with spawn
+        start_method=start_method,
+        task_timeout=task_timeout,
+        process_timeout=process_timeout,
+        safety=safety,
     )
 
 
@@ -114,6 +122,10 @@ class StageConfig:
     save_meta_callback: SaveMetaCallbackConfig | None
     save_pickle_callback: SavePickleCallbackConfig | None
     worker_wrapper: Callable[[Path], tuple[dict[str, Any], str | None, bool]]
+    start_method: _StartMethod = "fork"
+    task_timeout: int = 300
+    process_timeout: int = 120
+    safety: bool = False
     description: str = "Processing files"
 
 
@@ -125,6 +137,7 @@ class DefaultStage(Stage):
         self.callbacks = get_default_callbacks(
             CallbackConfig(
                 name=self._name,
+                statistics_key=self.config.statistics_key,
                 processing=config.processing,
                 dataset_stats_callback=config.dataset_stats_callback,
                 save_meta_callback=config.save_meta_callback,
@@ -141,9 +154,13 @@ class DefaultStage(Stage):
             _process_files(
                 use_meta=self.config.processing.use_meta,
                 meta_suffix=self.config.processing.meta_suffix,
-                worker_wrapper=self.config.worker_wrapper,
                 file_key=self.config.file_key,
                 statistics_key=self.config.statistics_key,
+                worker_wrapper=self.config.worker_wrapper,
+                start_method=self.config.start_method,
+                task_timeout=self.config.task_timeout,
+                process_timeout=self.config.process_timeout,
+                safety=self.config.safety,
                 description=self.config.description,
             ),
             annotations=self.config.processing.annotations,

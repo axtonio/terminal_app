@@ -100,6 +100,7 @@ def _default_each_file_output_path(file: Path) -> Path:
 def save_meta_callback(
     stages: PipesResult,
     stage_name: str | None,
+    stats_key: str | None,
     output_path: Path | str | None = None,
     filtered_only: bool = False,
     relative: bool = False,
@@ -108,6 +109,11 @@ def save_meta_callback(
     update_if_exists: bool = True,
     each_file_output_path: Callable[[Path], Path] | None = None,
 ):
+    if stage_name:
+        assert (
+            stats_key is not None
+        ), "stats_key is required when stage_name is provided"
+
     stage_index = list(stages.keys()).index(stage_name) if stage_name else -1
     meta: list[Any] = [
         m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]  # type: ignore
@@ -132,7 +138,10 @@ def save_meta_callback(
             if not file_meta:
                 if file in errors:
                     if stage_name:
-                        file_meta[stage_name]["error"] = errors[file]
+                        assert stats_key is not None
+                        if stats_key not in file_meta:
+                            file_meta[stats_key] = {}
+                        file_meta[stats_key]["error"] = errors[file]
                     else:
                         file_meta["error"] = errors[file]
 
@@ -196,9 +205,9 @@ def calculate_stats(
                 add_value(field)
             else:
                 ff = filter_by_regex(list(data_dict.keys()), field)
-                for f in ff:
+                for f in [_f for _f in ff if _f not in field_configs_copy.keys()]:
                     field_configs[f] = field_configs[field]
-                [add_value(f) for f in ff]
+                    add_value(f)
 
     count = len(data_list)
     result = {"count": count, "examples": {}}

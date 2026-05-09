@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from terminal_app.processing_utils import (
-    Callback,
+from .core import Callback
+from .utils import (
     PipesResult,
     dataset_stats,
     save_meta_callback,
@@ -47,6 +47,7 @@ class DatasetStatsCallbackConfig:
 @dataclass(slots=True)
 class CallbackConfig:
     name: str
+    statistics_key: str | None
     processing: ProcessingConfig
     dataset_stats_callback: DatasetStatsCallbackConfig | None
     save_meta_callback: SaveMetaCallbackConfig | None
@@ -95,6 +96,7 @@ class SaveMetaCallback(Callback):
         for_all_files: bool,
         meta_suffix: str,
         prefix: str | None,
+        statistics_key: str | None,
     ):
         self.output = output
         self.prefix = prefix or ""
@@ -102,6 +104,7 @@ class SaveMetaCallback(Callback):
         self.for_each_file = for_each_file
         self.for_all_files = for_all_files
         self.meta_suffix = meta_suffix
+        self.statistics_key = statistics_key
 
     def __call__(self, stages_result: PipesResult, stage_name: str | None) -> None:
         save_meta_callback(
@@ -117,6 +120,7 @@ class SaveMetaCallback(Callback):
             each_file_output_path=lambda file: file.with_name(
                 file.stem + self.meta_suffix
             ),
+            stats_key=self.statistics_key,
         )
 
     @property
@@ -165,6 +169,7 @@ def get_default_callbacks(config: CallbackConfig):
                 config.save_meta_callback.for_all_files,
                 config.processing.meta_suffix,
                 prefix=config.processing.prefix,
+                statistics_key=config.statistics_key,
             )
         )
     if config.save_pickle_callback is not None:
