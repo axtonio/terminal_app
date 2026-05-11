@@ -1,3 +1,4 @@
+import inspect
 import logging
 from dataclasses import dataclass
 from functools import partial
@@ -26,12 +27,35 @@ logger = logging.getLogger(__name__)
 _StartMethod = Literal["fork", "spawn"]
 
 
+def _call_worker_function(
+    function: (
+        Callable[[Path], tuple[dict[str, Any], str | None, bool]]
+        | Callable[[Path, str], tuple[dict[str, Any], str | None, bool]]
+    ),
+    file: Path,
+    device: str,
+) -> tuple[dict[str, Any], str | None, bool]:
+    try:
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        signature = None
+
+    callable_function: Any = function
+    if signature is not None and "device" in signature.parameters:
+        return callable_function(file, device)
+    return callable_function(file)
+
+
+Result = tuple[dict[str, Any], str | None, bool]
+WorkerFn = Callable[[Path], Result] | Callable[[Path, str], Result]
+
+
 def _process_file_worker_wrapper(
     file_str: str,
     meta: dict[str, Any],
     device: str,
     use_meta: bool,
-    function: Callable[[Path], tuple[dict[str, Any], str | None, bool]],
+    function: WorkerFn,
     file_key: str,
     stats_key: str,
     meta_suffix: str,
@@ -49,11 +73,13 @@ def _process_file_worker_wrapper(
     meta_path = file.with_name(file.stem + meta_suffix)
 
     if file.is_symlink():
-        source_meta_path = (
-            (file.parent / file.readlink()).resolve().with_name(file.stem + meta_suffix)
-        )
-        if source_meta_path.exists():
-            link_file(file.readlink().with_name(file.stem + meta_suffix), meta_path)
+        meta_name = file.readlink().stem + meta_suffix
+        source_meta_path = (file.parent / file.readlink()).with_name(meta_name)
+
+        if source_meta_path.exists() and (
+            not meta_path.exists() or meta_path.is_symlink()
+        ):
+            link_file(file.readlink().with_name(meta_name), meta_path)
             use_meta = True
 
     get_result = False
@@ -67,8 +93,10 @@ def _process_file_worker_wrapper(
 
     if not get_result:
         try:
-            meta[stats_key], failed_filter, passed = function(
+            meta[stats_key], failed_filter, passed = _call_worker_function(
+                function,
                 file,
+                device,
             )
         except Exception as ex:
             logger.error(str(ex))
@@ -86,12 +114,13 @@ def _process_files(
     meta_suffix: str,
     file_key: str,
     statistics_key: str,
-    worker_wrapper: Callable[[Path], tuple[dict[str, Any], str | None, bool]],
+    worker_wrapper: WorkerFn,
     start_method: _StartMethod,
     task_timeout: int,
     process_timeout: int,
     safety: bool,
     description: str,
+    logging: bool,
 ):
     return partial(
         process_files,
@@ -109,6 +138,7 @@ def _process_files(
         task_timeout=task_timeout,
         process_timeout=process_timeout,
         safety=safety,
+        logging=logging,
     )
 
 
@@ -121,12 +151,13 @@ class StageConfig:
     dataset_stats_callback: DatasetStatsCallbackConfig | None
     save_meta_callback: SaveMetaCallbackConfig | None
     save_pickle_callback: SavePickleCallbackConfig | None
-    worker_wrapper: Callable[[Path], tuple[dict[str, Any], str | None, bool]]
+    worker_wrapper: WorkerFn
     start_method: _StartMethod = "fork"
     task_timeout: int = 300
     process_timeout: int = 120
     safety: bool = False
     description: str = "Processing files"
+    logging: bool = True
 
 
 class DefaultStage(Stage):
@@ -162,6 +193,7 @@ class DefaultStage(Stage):
                 process_timeout=self.config.process_timeout,
                 safety=self.config.safety,
                 description=self.config.description,
+                logging=self.config.logging,
             ),
             annotations=self.config.processing.annotations,
             max_workers=self.config.processing.max_workers,

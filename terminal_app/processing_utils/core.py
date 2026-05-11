@@ -58,7 +58,7 @@ def run_stages(
     stages: Sequence[Stage],
     callbacks: Sequence[Callback] | None = None,
     stdout: Callable[[Any], Any] = _stdout,
-):
+) -> PipesResult:
 
     all_files: FilesWithMeta | None = None
     filtered_files: FilesWithMeta | None = None
@@ -94,6 +94,8 @@ def run_stages(
             callback(stages_result, None)
             end = time.time()
             stdout(f"{callback.name} callback duration: {end-start}s")
+
+    return stages_result
 
 
 def _worker(

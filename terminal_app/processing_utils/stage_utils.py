@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class ProcessingConfig:
     annotations: Sequence[str | Path] | None
-    output: Path
+    output: Path | None
     max_workers: int
     use_meta: bool
     meta_suffix: str
@@ -150,6 +150,9 @@ class SavePickleCallback(Callback):
 def get_default_callbacks(config: CallbackConfig):
     callbacks: list[Callback] = []
     if config.dataset_stats_callback is not None:
+        assert (
+            config.processing.output is not None
+        ), "output is required when dataset_stats_callback is not None"
         callbacks.append(
             DatasetStatsCallback(
                 config.dataset_stats_callback.stage_stats,
@@ -161,6 +164,9 @@ def get_default_callbacks(config: CallbackConfig):
             )
         )
     if config.save_meta_callback is not None:
+        assert (
+            config.processing.output is not None
+        ), "output is required when save_meta_callback is not None"
         callbacks.append(
             SaveMetaCallback(
                 config.processing.output,
@@ -173,6 +179,9 @@ def get_default_callbacks(config: CallbackConfig):
             )
         )
     if config.save_pickle_callback is not None:
+        assert (
+            config.processing.output is not None
+        ), "output is required when save_pickle_callback is not None"
         callbacks.append(
             SavePickleCallback(
                 config.save_pickle_callback.root_folder,
