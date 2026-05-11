@@ -25,12 +25,12 @@ dynamic = ["version"]
 [project.urls]
 GitHub = "https://github.com/axtonio/terminal_app"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["terminal_app*"]
+[tool.setuptools]
+package-dir = { "" = "src" }
 
-[tool.setuptools.package-data]
-"*" = ['*.json']
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["terminal_app*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "terminal_app.__version__" }
