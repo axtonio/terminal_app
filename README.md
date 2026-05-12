@@ -60,6 +60,5 @@ print(params["all_params"] is params)
 Run the test suite from the project environment:
 
 ```bash
-conda activate cadpac_tripo
 pytest
 ```
