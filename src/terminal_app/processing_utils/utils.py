@@ -128,6 +128,9 @@ def save_meta_callback(
                 if each_file_output_path
                 else _default_each_file_output_path(file)
             )
+            if output_json_path.is_symlink():
+                continue
+
             file_meta_for_update = {}
             if output_json_path.exists():
                 if not replace_if_exists and not update_if_exists:
