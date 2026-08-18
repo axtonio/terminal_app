@@ -187,7 +187,11 @@ def process_files(
     desc: str,
     max_workers: int | None = None,
     annotations: Path | str | Sequence[Path | str] | None = None,
-    override_files: list[tuple[Path, dict[str, Any]]] | None = None,
+    override_files: (
+        list[tuple[Path, dict[str, Any]]]
+        | Callable[[], list[tuple[Path, dict[str, Any]]]]
+        | None
+    ) = None,
     safety: bool = False,
     logging: bool = True,
     start_method: Literal["fork", "spawn"] | None = None,
@@ -222,7 +226,7 @@ def process_files(
     info_stdout(f"Starting processing with {max_workers} workers")
 
     if override_files:
-        filtered_files = override_files
+        filtered_files = override_files() if callable(override_files) else override_files
 
     if filtered_files is None and annotations is not None:
         filtered_files = [

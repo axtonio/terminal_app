@@ -23,6 +23,11 @@ class ProcessingConfig:
     use_meta: bool
     meta_suffix: str
     prefix: str | None
+    override_files: (
+        list[tuple[Path, dict[str, Any]]]
+        | Callable[[], list[tuple[Path, dict[str, Any]]]]
+        | None
+    ) = None
 
 
 @dataclass(slots=True)

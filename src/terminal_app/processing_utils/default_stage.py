@@ -197,4 +197,5 @@ class DefaultStage(Stage):
             ),
             annotations=self.config.processing.annotations,
             max_workers=self.config.processing.max_workers,
+            override_files=self.config.processing.override_files,
         )(filtered_files)
