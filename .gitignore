@@ -5,3 +5,7 @@ terminal_app.egg-info/
 
 # macOS Finder metadata
 .DS_Store
+
+# Local generated files and machine-specific credentials
+**/__pycache__/
+*.py[cod]
