@@ -9,6 +9,7 @@ readme = "README.md"
 authors = [{ name = "Antonio Rodrigues", email = "axtonio.code@gmail.com" }]
 keywords = ["terminal_app", "mipt"]
 dependencies = [
+	"numpy",
 	"tqdm",
 	"certifi",
 	"natsort",

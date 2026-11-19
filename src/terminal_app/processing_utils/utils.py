@@ -1,17 +1,21 @@
 import json
 import logging
-import math
 import os
 import pickle
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-import numpy as np
+from terminal_app.utils import to_relative
 
-from terminal_app.utils import filter_by_regex, is_regex_pattern, to_relative
-
-from .types import FilesWithMeta, PipesResult, StageResult
+from .types import (
+    FilesWithMeta,
+    PipesResult,
+    StageResult,
+    StageItem,
+    StageError,
+    normalize_items,
+)
+from .statistics import calculate_stats, find_closest_path
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,14 +53,9 @@ def files_transition(
         files: FilesWithMeta,
     ):
         result: FilesWithMeta = []
-        for file, meta in files:
-            relative_file = construct_relative_file(file)
-            result.append(
-                (
-                    relative_file,
-                    meta,
-                )
-            )
+        for item in normalize_items(files):
+            relative_file = construct_relative_file(item.path)
+            result.append(StageItem(item.item_id, relative_file, item.meta))
         return result
 
     return (
@@ -108,6 +107,7 @@ def save_meta_callback(
     replace_if_exists: bool = False,
     update_if_exists: bool = True,
     each_file_output_path: Callable[[Path], Path] | None = None,
+    file_key: str | None = None,
 ):
     if stage_name:
         assert (
@@ -138,17 +138,35 @@ def save_meta_callback(
                 if update_if_exists:
                     file_meta_for_update = json.loads(output_json_path.read_text())
 
-            if not file_meta:
-                if file in errors:
-                    if stage_name:
-                        assert stats_key is not None
-                        if stats_key not in file_meta:
-                            file_meta[stats_key] = {}
-                        file_meta[stats_key]["error"] = errors[file]
-                    else:
-                        file_meta["error"] = errors[file]
-
-            file_meta_for_update.update(file_meta)
+            # A leaf owns only its statistics section. Never restore stale
+            # sibling sections from its pre-execution metadata snapshot.
+            update = (
+                {stats_key: file_meta[stats_key]}
+                if stats_key and stats_key in file_meta
+                else {}
+            )
+            if stats_key is None:
+                update = dict(file_meta)
+            else:
+                owned_file_key = (
+                    file_key or stats_key.removesuffix("_statistics") + "_file"
+                )
+                if owned_file_key in file_meta:
+                    update[owned_file_key] = file_meta[owned_file_key]
+            if not update:
+                messages = [
+                    error.message if isinstance(error, StageError) else str(error)
+                    for key, error in errors.items()
+                    if (
+                        error.path == file
+                        if isinstance(error, StageError)
+                        else key == file
+                    )
+                ]
+                if messages:
+                    error_meta = {"error": "; ".join(messages)}
+                    update = {stats_key: error_meta} if stats_key else error_meta
+            file_meta_for_update.update(update)
             file_meta = file_meta_for_update
 
             os.makedirs(output_json_path.parent, exist_ok=True)
@@ -174,122 +192,6 @@ def save_meta_callback(
             )
         )
         logger.info(f"Save {output_path}")
-
-
-def find_closest_path(values, target_value, paths):
-    if not values or not paths:
-        return None
-
-    differences = [abs(value - target_value) for value in values]
-    closest_idx = np.argmin(differences)
-    return paths[closest_idx]
-
-
-def calculate_stats(
-    data_list: list[tuple[str, Any]], field_configs: dict[str, dict[str, bool]]
-):
-    if not data_list:
-        return None
-
-    values_dict: dict[str, list[tuple[str, float | bool]]] = defaultdict(lambda: [])
-
-    field_configs = field_configs.copy()
-    field_configs_copy = field_configs.copy()
-    for path, data in data_list:
-        data_dict: dict[str, Any] = data.dict() if hasattr(data, "dict") else data
-        for field in field_configs_copy.keys():
-
-            def add_value(field: str):
-                value = data_dict.get(field)
-                if value is not None and not math.isnan(value):
-                    values_dict[field].append((path, value))
-
-            if not is_regex_pattern(field):
-                add_value(field)
-            else:
-                ff = filter_by_regex(list(data_dict.keys()), field)
-                for f in [_f for _f in ff if _f not in field_configs_copy.keys()]:
-                    field_configs[f] = field_configs[field]
-                    add_value(f)
-
-    count = len(data_list)
-    result = {"count": count, "examples": {}}
-
-    # Вычисляем статистики для каждого поля
-    for field, items in values_dict.items():
-        config = field_configs[field]
-        values = [v for _, v in items]
-        paths = [p for p, _ in items]
-        store_examples = config.get("store_examples", False)
-
-        if not values:
-            continue
-
-        min_idx = np.argmin(values)
-        max_idx = np.argmax(values)
-        if field.startswith("is_"):
-            result[f"{field}_count"] = int(sum(values))
-            result[f"{field}_ratio"] = float(sum(values) / count)
-
-            if store_examples:
-
-                if min_idx == max_idx and values[max_idx] == 0.0:
-                    continue
-                result["examples"][field] = (
-                    paths[max_idx] if paths[max_idx] else "unknown"
-                )
-        else:
-            mean_val = float(np.mean(values))
-            median_val = float(np.median(values))
-            min_val = float(np.min(values))
-            max_val = float(np.max(values))
-            std_val = float(np.std(values))
-
-            quantile_25 = float(np.quantile(values, 0.25))
-            quantile_75 = float(np.quantile(values, 0.75))
-            quantile_90 = float(np.quantile(values, 0.90))
-
-            if mean_val == median_val == min_val == max_val == std_val == 0.0:
-                continue
-
-            result[f"{field}_mean"] = mean_val
-            result[f"{field}_median"] = median_val
-            result[f"{field}_min"] = min_val
-            result[f"{field}_max"] = max_val
-            result[f"{field}_std"] = std_val
-
-            result[f"{field}_quantile_25"] = quantile_25
-            result[f"{field}_quantile_75"] = quantile_75
-            result[f"{field}_quantile_90"] = quantile_90
-
-            if store_examples:
-
-                if min_idx == max_idx:
-                    continue
-                result["examples"][f"min_{field}"] = (
-                    paths[min_idx] if paths[min_idx] else "unknown"
-                )
-                result["examples"][f"max_{field}"] = (
-                    paths[max_idx] if paths[max_idx] else "unknown"
-                )
-                result["examples"][f"mean_{field}"] = find_closest_path(
-                    values, mean_val, paths
-                )
-                result["examples"][f"median_{field}"] = find_closest_path(
-                    values, median_val, paths
-                )
-
-                result["examples"][f"quantile_25_{field}"] = find_closest_path(
-                    values, quantile_25, paths
-                )
-                result["examples"][f"quantile_75_{field}"] = find_closest_path(
-                    values, quantile_75, paths
-                )
-                result["examples"][f"quantile_90_{field}"] = find_closest_path(
-                    values, quantile_90, paths
-                )
-
-    return result
 
 
 def dataset_stats(
@@ -324,23 +226,22 @@ def dataset_stats(
             stat_func(stages, stage_name, stat_dict)
 
     for stage_name, (_, _, errors) in stages.items():
-        failed_files = list(errors.keys())
-        stat_dict["errors"][stage_name] = {
-            k: {
-                "count": int(v),
-                "example": (failed_files[i] if i < len(failed_files) else "unknown"),
-            }
-            for k, i, v in zip(
-                *np.unique(
-                    np.array(list(errors.values())),
-                    return_index=True,
-                    return_counts=True,
-                )
+        grouped = {}
+        for error in errors.values():
+            entry = grouped.setdefault(
+                error.message, {"count": 0, "example": error.path}
             )
+            entry["count"] += 1
+        stat_dict["errors"][stage_name] = grouped
+        failed_output_data[stage_name] = {
+            key: {
+                "item_id": error.item_id,
+                "path": error.path,
+                "stage": error.stage,
+                "message": error.message,
+            }
+            for key, error in errors.items()
         }
-
-        # Convert Path to string for JSON serialization, _json_default not support keys
-        failed_output_data[stage_name] = {p.as_posix(): e for p, e in errors.items()}
 
     if failed_output:
         Path(failed_output).write_text(
@@ -391,7 +292,7 @@ def stage_stats(
     stages: PipesResult,
     stage_name: str,
     stats: dict[str, Any],
-    field_configs: dict[str, dict[str, bool]],
+    field_configs: dict[str, dict[str, Any]],
     file_key: str,
     stats_key: str,
 ):

@@ -62,3 +62,85 @@ Run the test suite from the project environment:
 ```bash
 pytest
 ```
+
+## Composable processing
+
+`SequenceStages` passes successful items to its next child. `ParallelStages`
+passes a separate metadata snapshot of the same input to every child and merges
+only the fields each branch changed. Branch execution is currently sequential.
+Conflicting edits reject the affected item with an explicit error.
+
+```python
+from pathlib import Path
+from terminal_app.processing_utils.core import ParallelStages, SequenceStages, run_stages
+from terminal_app.processing_utils.types import StageItem
+
+pipeline = SequenceStages("evaluation", [
+    prepare_stage,
+    ParallelStages("metrics", [distance_stage, overlap_stage], pass_condition=any),
+])
+results = run_stages(
+    [pipeline],
+    filtered_files=[StageItem("attempt-1", Path("sample.py"), {})],
+    use_meta=["evaluation/prepare"],
+)
+all_items, successful_items, errors = results["evaluation"]
+```
+
+Each result has `(all_files, filtered_files, errors)`. `all_files` retains each
+input attempt once, including rejected attempts. `StageItem.item_id` survives
+path changes; path/meta pair unpacking remains available for existing readers.
+Producers that change paths must return `StageItem` with the original identity.
+Errors are keyed events with `StageError(item_id, path, stage, message)` values.
+A leaf holds its own errors; composites aggregate their direct children's errors.
+Final statistics should consume the target composite once rather than concatenate
+its descendant snapshots.
+
+Result keys and callback stage names are full paths such as
+`evaluation/metrics/distance`. Callbacks run after their node completes, including
+cache hits. **Transitions now transform a node's input before it executes**;
+move transitions previously attached to the preceding stage onto their target.
+The parallel `pass_condition` receives success booleans in declaration order.
+Its separate `output_path_selector` receives ordered `BranchResult` objects;
+the default uses the first successful branch's path. All metadata and errors
+remain available regardless of which path is chosen.
+
+`use_meta=[]` disables cache everywhere; a list of paths enables the named nodes
+and their descendants. Unknown paths fail before execution. Boolean policies
+remain available for older callers. Cache selection is resolved by `run_stages`,
+not by the truthiness of the list. A leaf saves only its own statistics section
+and associated file field, preserving newer sibling sections already on disk.
+
+Worker exceptions, task timeouts and missing replies become item errors in both
+safety modes. `process_timeout` also limits a non-isolated task; a dead worker's
+outstanding items remain in `all_files` with their incoming metadata.
+
+## Structured statistics
+
+`calculate_stats` describes one selection; callers own grouping predicates and
+any overall metrics. Its result contains `statistics`, `ratios`, and `summary`.
+
+```python
+from terminal_app.processing_utils.statistics import calculate_stats
+
+result = calculate_stats(
+    [("sample.stl", {"distance": 0.0, "invalid": False})],
+    {
+        "distance": {"kind": "statistics", "store_examples": True},
+        "invalid": {"kind": "ratio", "store_examples": True},
+    },
+)
+```
+
+Numeric summaries contain `{value, example}` for mean, median, min, max, standard
+deviation and 25/75/90 percentiles. Representative examples are the nearest real
+observation; standard deviation has no example. Zero values remain visible.
+Ratio fields contain positive `count`, `ratio`, `positive_example` and
+`negative_example`. Missing flags never become negative examples. The default
+ratio denominator is the full selection; `denominator="observed"` explicitly
+selects another policy. `summary.count` is the selection size. Empty selections
+and missing measurements use `null` values/examples rather than NaN.
+
+Existing field patterns and `store_examples` remain supported. Callers should
+specify `kind`; configurations without it retain the legacy `is_` convention.
+The former flat statistics keys and separate examples map are no longer emitted.

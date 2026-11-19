@@ -61,18 +61,18 @@ def _process_file_worker_wrapper(
     meta_suffix: str,
 ):
     file = Path(file_str)
-    if not file.exists():
-        return (file, meta, "file_not_exist", False)
-
     passed: bool = True
     failed_filter: str | None = None
 
     meta[file_key] = file_str
     meta[stats_key] = {}
+    if not file.exists():
+        meta[stats_key]["error"] = "file_not_exist"
+        return (file, meta, "file_not_exist", False)
 
     meta_path = file.with_name(file.stem + meta_suffix)
 
-    if file.is_symlink():
+    if use_meta and file.is_symlink():
         meta_name = file.readlink().stem + meta_suffix
         source_meta_path = (file.parent / file.readlink()).with_name(meta_name)
 
@@ -169,6 +169,7 @@ class DefaultStage(Stage):
             CallbackConfig(
                 name=self._name,
                 statistics_key=self.config.statistics_key,
+                file_key=self.config.file_key,
                 processing=config.processing,
                 dataset_stats_callback=config.dataset_stats_callback,
                 save_meta_callback=config.save_meta_callback,
@@ -181,9 +182,17 @@ class DefaultStage(Stage):
         return self._name
 
     def __call__(self, filtered_files: FilesWithMeta | None) -> Any:
+        if self._use_meta is None and not isinstance(
+            self.config.processing.use_meta, bool
+        ):
+            raise ValueError("A stage-path cache policy must be resolved by run_stages")
         return partial(
             _process_files(
-                use_meta=self.config.processing.use_meta,
+                use_meta=(
+                    self._use_meta
+                    if self._use_meta is not None
+                    else self.config.processing.use_meta
+                ),
                 meta_suffix=self.config.processing.meta_suffix,
                 file_key=self.config.file_key,
                 statistics_key=self.config.statistics_key,
