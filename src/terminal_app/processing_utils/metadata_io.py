@@ -67,11 +67,8 @@ def _owned_metadata(meta: dict, settings: MetaFileSettings) -> dict:
     update = {}
     if settings.stats_key in meta:
         update[settings.stats_key] = meta[settings.stats_key]
-    file_key = (
-        settings.file_key or settings.stats_key.removesuffix("_statistics") + "_file"
-    )
-    if file_key in meta:
-        update[file_key] = meta[file_key]
+    if settings.file_key is not None and settings.file_key in meta:
+        update[settings.file_key] = meta[settings.file_key]
     return update
 
 

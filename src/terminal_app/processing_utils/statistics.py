@@ -1,20 +1,21 @@
 import math
-from typing import Any
+from functools import partial
+from typing import Any, Callable, SupportsFloat
 
 import numpy as np
 
 from terminal_app.utils.utils import filter_by_regex, is_regex_pattern
 
-STATISTICS = (
-    "mean",
-    "median",
-    "min",
-    "max",
-    "std",
-    "quantile_25",
-    "quantile_75",
-    "quantile_90",
-)
+_STATISTICS: dict[str, Callable[[list[float]], SupportsFloat]] = {
+    "mean": np.mean,
+    "median": np.median,
+    "min": min,
+    "max": max,
+    "std": np.std,
+    "quantile_25": partial(np.quantile, q=0.25),
+    "quantile_75": partial(np.quantile, q=0.75),
+    "quantile_90": partial(np.quantile, q=0.90),
+}
 
 
 def find_closest_path(values, target_value, paths):
@@ -40,24 +41,15 @@ def _numeric(items, store_examples):
     values = [float(value) for _, value in items]
     paths = [path for path, _ in items]
     result: dict[str, dict[str, Any]] = {
-        name: {"value": None, "example": None} for name in STATISTICS
+        name: {"value": None, "example": None} for name in _STATISTICS
     }
     if not values:
         return result
-    calculated = {
-        "mean": float(np.mean(values)),
-        "median": float(np.median(values)),
-        "min": min(values),
-        "max": max(values),
-        "std": float(np.std(values)),
-        "quantile_25": float(np.quantile(values, 0.25)),
-        "quantile_75": float(np.quantile(values, 0.75)),
-        "quantile_90": float(np.quantile(values, 0.90)),
-    }
-    for name, value in calculated.items():
-        result[name]["value"] = float(value) if math.isfinite(value) else None
+    for name, function in _STATISTICS.items():
+        value = float(function(values))
+        result[name]["value"] = value if math.isfinite(value) else None
         if store_examples and name != "std" and result[name]["value"] is not None:
-            result[name]["example"] = find_closest_path(values, float(value), paths)
+            result[name]["example"] = find_closest_path(values, value, paths)
     return result
 
 

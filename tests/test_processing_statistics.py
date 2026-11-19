@@ -69,11 +69,16 @@ def test_section_save_preserves_newer_sibling_metadata(tmp_path: Path):
             {
                 "cd_statistics": {"CD": 2},
                 "iou_statistics": {"IoU": 0.1},
+                "iou_file": "current.stl",
                 "source": "keep",
             }
         )
     )
-    snapshot = {"cd_statistics": {"CD": 1}, "iou_statistics": {"IoU": 0.8}}
+    snapshot = {
+        "cd_statistics": {"CD": 1},
+        "iou_statistics": {"IoU": 0.8},
+        "iou_file": "stale.stl",
+    }
     item = StageItem("id", path, snapshot)
     save_meta_callback(
         {"iou": ([item], [item], {})}, "iou", "iou_statistics", for_each_file=True
@@ -81,6 +86,7 @@ def test_section_save_preserves_newer_sibling_metadata(tmp_path: Path):
     assert json.loads(output.read_text()) == {
         "cd_statistics": {"CD": 2},
         "iou_statistics": {"IoU": 0.8},
+        "iou_file": "current.stl",
         "source": "keep",
     }
 

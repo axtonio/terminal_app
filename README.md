@@ -137,6 +137,7 @@ and their descendants. Unknown paths fail before execution. Boolean policies
 remain available for older callers. Cache selection is resolved by `run_stages`,
 not by the truthiness of the list. A leaf saves only its own statistics section
 and associated file field, preserving newer sibling sections already on disk.
+The caller supplies `file_key` explicitly; it is not inferred from `stats_key`.
 Saving a new section through a metadata symlink creates a local file and leaves
 the source unchanged. Cached paths are resolved relative to the source metadata.
 Callbacks with nothing to save leave existing links untouched.
