@@ -1,0 +1,16 @@
+black==26.5.1
+ruff==0.16.9
+wemake-python-styleguide==1.8.1
+flake8==7.4.1
+pylint==4.1.1
+mypy==2.3.1
+import-linter==2.15
+ast-grep-cli==0.45.3
+mollify==0.2.2
+pre-commit==4.6.2
+# Published stubs; exact versions are pinned in requirements.lock.
+boto3-stubs[s3]
+pandas-stubs
+types-paramiko
+types-psutil
+types-PyYAML

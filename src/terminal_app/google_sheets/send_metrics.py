@@ -1,376 +1,150 @@
-import json
-import logging
-import mimetypes
-import os
+"""Batch report upload, with compatibility imports for the original module API."""
+
 import time
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any
 
 import gspread
 import pandas as pd
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials as UserCredentials
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from gspread_dataframe import set_with_dataframe
-from gspread_formatting import (
-    CellFormat,
-    Color,
-    ConditionalFormatRule,
-    GradientRule,
-    GridRange,
-    InterpolationPoint,
-    format_cell_range,
-    get_conditional_format_rules,
-    set_column_width,
-    set_row_heights,
+from tenacity import Retrying, stop_after_attempt, wait_fixed
+
+from terminal_app.google_sheets.credentials import get_credentials as get_credentials
+from terminal_app.google_sheets.dataframe import (
+    set_with_dataframe_and_images as set_with_dataframe_and_images,
 )
-from tenacity import retry, stop_after_attempt, wait_fixed
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
-
-TColumnConfig = Literal[
-    "type",
-    "formatting",
-]
-
-TFile = Literal["image", "document", "google_document"]
-
-
-DUSTY_RED = Color(0.8, 0.4, 0.4)
-WARM_SAND = Color(0.9, 0.8, 0.5)
-SAGE_GREEN = Color(0.4, 0.7, 0.5)
-
-
-def format_decreasing(cell_range: str, worksheet: gspread.Worksheet):
-    return ConditionalFormatRule(
-        ranges=[GridRange.from_a1_range(cell_range, worksheet)],
-        gradientRule=GradientRule(
-            minpoint=InterpolationPoint(color=SAGE_GREEN, type="MIN"),
-            midpoint=InterpolationPoint(color=WARM_SAND, type="PERCENTILE", value="50"),
-            maxpoint=InterpolationPoint(color=DUSTY_RED, type="MAX"),
-        ),
-    )
-
-
-def format_increasing(cell_range: str, worksheet: gspread.Worksheet):
-    return ConditionalFormatRule(
-        ranges=[GridRange.from_a1_range(cell_range, worksheet)],
-        gradientRule=GradientRule(
-            minpoint=InterpolationPoint(color=DUSTY_RED, type="MIN"),
-            midpoint=InterpolationPoint(color=WARM_SAND, type="PERCENTILE", value="50"),
-            maxpoint=InterpolationPoint(color=SAGE_GREEN, type="MAX"),
-        ),
-    )
-
-
-def format_width(cell_range: str, worksheet: gspread.Worksheet, value: int):
-
-    if value:
-        col_letter = cell_range.split(":")[0]
-        col_letter = "".join(filter(str.isalpha, col_letter))
-        set_column_width(worksheet, col_letter, value)
-
-
-FORMATTING_REGISTRY = {
-    "width": format_width,
-    "decreasing": format_decreasing,
-    "increasing": format_increasing,
-}
+from terminal_app.google_sheets.drive import (
+    FILE_TYPE_REGISTRY as FILE_TYPE_REGISTRY,
+)
+from terminal_app.google_sheets.drive import (
+    _get_or_create_folder as _get_or_create_folder,
+)
+from terminal_app.google_sheets.drive import (
+    _upload_file_to_drive as _upload_file_to_drive,
+)
+from terminal_app.google_sheets.drive import (
+    process_document as process_document,
+)
+from terminal_app.google_sheets.drive import (
+    process_google_document as process_google_document,
+)
+from terminal_app.google_sheets.drive import (
+    process_image as process_image,
+)
+from terminal_app.google_sheets.drive import (
+    process_link as process_link,
+)
+from terminal_app.google_sheets.formatting import (
+    DUSTY_RED as DUSTY_RED,
+)
+from terminal_app.google_sheets.formatting import (
+    FORMATTING_REGISTRY as FORMATTING_REGISTRY,
+)
+from terminal_app.google_sheets.formatting import (
+    SAGE_GREEN as SAGE_GREEN,
+)
+from terminal_app.google_sheets.formatting import (
+    WARM_SAND as WARM_SAND,
+)
+from terminal_app.google_sheets.formatting import (
+    format_decreasing as format_decreasing,
+)
+from terminal_app.google_sheets.formatting import (
+    format_increasing as format_increasing,
+)
+from terminal_app.google_sheets.formatting import (
+    format_width as format_width,
+)
+from terminal_app.google_sheets.formatting import (
+    format_worksheet,
+)
+from terminal_app.google_sheets.logging import formatter as formatter
+from terminal_app.google_sheets.logging import logger as logger
+from terminal_app.google_sheets.logging import stream_handler as stream_handler
+from terminal_app.google_sheets.types import TColumnConfig as TColumnConfig
+from terminal_app.google_sheets.types import TFile as TFile
 
 
-def _get_or_create_folder(drive_service, folder_name: str, parent_id: str) -> str:
-    query = f"name = '{folder_name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    results = drive_service.files().list(q=query, fields="files(id)").execute()
-    files = results.get("files", [])
-
-    if files:
-        return files[0]["id"]
-
-    file_metadata = {
-        "name": folder_name,
-        "mimeType": "application/vnd.google-apps.folder",
-        "parents": [parent_id],
+def _dataframes(
+    results: dict[str, pd.DataFrame] | dict[str, list[dict[str, Any]]],
+    decimals: int | None,
+) -> dict[str, pd.DataFrame]:
+    frames = {
+        key: (value if isinstance(value, pd.DataFrame) else pd.DataFrame(value))
+        for key, value in results.items()
     }
-    folder = (
-        drive_service.files()
-        .create(body=file_metadata, fields="id", supportsAllDrives=True)
-        .execute()
-    )
-    return folder.get("id")
-
-
-def _upload_file_to_drive(
-    drive_service,
-    local_path: str,
-    filename: str,
-    folder_id: str,
-    convert_to_google_doc: bool = False,
-    make_subfolders: bool = False,
-    replace_existing: bool = False,
-) -> tuple[str, str]:
-
-    if make_subfolders and len(Path(filename).parts) > 1:
-        parts = Path(filename).parts
-        subfolder_name = parts[0]
-        subfolder_id = _get_or_create_folder(drive_service, subfolder_name, folder_id)
-
-        return _upload_file_to_drive(
-            drive_service,
-            local_path,
-            os.path.join(*parts[1:]),
-            subfolder_id,
-            convert_to_google_doc,
-            make_subfolders,
-            replace_existing,
-        )
-
-    query = f"name = '{filename}' and '{folder_id}' in parents and trashed = false"
-    results = (
-        drive_service.files().list(q=query, fields="files(id, mimeType)").execute()
-    )
-    files = results.get("files", [])
-    if files:
-        file_obj = files[0]
-        file_id = file_obj["id"]
-
-        if not replace_existing:
-            logger.info(
-                f"File {filename} already exists in folder {folder_id}. Skipping upload."
-            )
-            return file_id, filename
-
-        if file_obj.get("mimeType") == "application/vnd.google-apps.document":
-            logger.info(f"Updating existing Google Doc: {filename} ({file_id})")
-
-            mime_type, _ = mimetypes.guess_type(local_path)
-            if not mime_type:
-                mime_type = "application/octet-stream"
-
-            media = MediaFileUpload(local_path, mimetype=mime_type)
-
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=media,
-                supportsAllDrives=True,
-            ).execute()
-
-            return file_id, filename
-
-        logger.info(f"Deleting and replacing file: {filename} ({file_id})")
-        drive_service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
-
-    mime_type, _ = mimetypes.guess_type(local_path)
-    if not mime_type:
-        mime_type = "application/octet-stream"
-
-    file_metadata: dict[str, Any] = {
-        "name": filename,
+    if decimals is not None:
+        frames = {key: frame.round(decimals) for key, frame in frames.items()}
+    return {
+        key: (frame if isinstance(frame.index, pd.RangeIndex) else frame.reset_index())
+        for key, frame in frames.items()
     }
 
-    file_metadata["parents"] = [folder_id]
 
-    if convert_to_google_doc:
-        file_metadata["mimeType"] = "application/vnd.google-apps.document"
-
-    media = MediaFileUpload(local_path, mimetype=mime_type)
-    uploaded_file = (
-        drive_service.files()
-        .create(
-            body=file_metadata,
-            media_body=media,
-            fields="id",
-            supportsAllDrives=True,
-        )
-        .execute()
-    )
-    file_id = uploaded_file.get("id")
-
-    drive_service.permissions().create(
-        fileId=file_id,
-        body={"role": "reader", "type": "anyone"},
-        supportsAllDrives=True,
-    ).execute()
-
-    return file_id, filename
+def _worksheet(spreadsheet: gspread.Spreadsheet, name: str) -> gspread.Worksheet:
+    try:
+        worksheet = spreadsheet.worksheet(name)
+        worksheet.clear()
+        logger.info("Find worksheet %s", name)
+        return worksheet
+    except gspread.WorksheetNotFound:
+        logger.info("Create worksheet %s", name)
+        return spreadsheet.add_worksheet(title=name, rows=100, cols=20)
 
 
-def process_image(
-    drive_service,
-    local_path: str,
-    folder_id: str,
-    filename_extractor: Callable[[str], str] = lambda x: Path(x).name,
-    make_subfolders: bool = False,
-    replace_existing: bool = False,
-) -> str:
-    file_id, _ = _upload_file_to_drive(
-        drive_service,
-        local_path,
-        filename_extractor(local_path),
-        folder_id,
-        make_subfolders=make_subfolders,
-        replace_existing=replace_existing,
-    )
-    public_link = f"https://drive.google.com/uc?id={file_id}"
-    return f'=IMAGE("{public_link}")'
-
-
-def process_document(
-    drive_service,
-    local_path: str,
-    folder_id: str,
-    filename_extractor: Callable[[str], str] = lambda x: Path(x).name,
-    make_subfolders: bool = False,
-    replace_existing: bool = False,
-) -> str:
-    file_id, file_name = _upload_file_to_drive(
-        drive_service,
-        local_path,
-        filename_extractor(local_path),
-        folder_id,
-        make_subfolders=make_subfolders,
-        replace_existing=replace_existing,
-    )
-    view_link = f"https://drive.google.com/open?id={file_id}"
-    return f'=HYPERLINK("{view_link}", "{file_name}")'
-
-
-def process_link(
-    drive_service,
-    local_path: str,
-    filename_extractor: Callable[[str], str] = lambda x: Path(x).name,
-) -> str:
-
-    return f'=HYPERLINK("{local_path}", "{filename_extractor(local_path)}")'
-
-
-def process_google_document(
-    drive_service,
-    local_path: str,
-    folder_id: str,
-    filename_extractor: Callable[[str], str] = lambda x: Path(x).stem,
-    make_subfolders: bool = False,
-    replace_existing: bool = False,
-) -> str:
-    file_id, file_name = _upload_file_to_drive(
-        drive_service,
-        local_path,
-        filename_extractor(local_path),
-        folder_id,
-        convert_to_google_doc=True,
-        make_subfolders=make_subfolders,
-        replace_existing=replace_existing,
-    )
-    view_link = f"https://drive.google.com/open?id={file_id}"
-    return f'=HYPERLINK("{view_link}", "{file_name}")'
-
-
-FILE_TYPE_REGISTRY = {
-    "image": process_image,
-    "document": process_document,
-    "google_document": process_google_document,
-    "link": process_link,
-}
-
-
-def set_with_dataframe_and_images(
+def _upload_batch(
     worksheet: gspread.Worksheet,
-    df: pd.DataFrame,
-    drive_service,
-    columns_config: dict[str, dict[TColumnConfig, Any]] | None = None,
-    row: int = 1,
-    col: int = 1,
-    include_index: bool = False,
-    include_column_header: bool = True,
-    resize: bool = False,
-):
-
-    if columns_config:
-        for col_name in df.columns:
-            col_config = columns_config.get(col_name, {})
-            column_type_config = col_config.get("type", {})
-
-            column_type_name = column_type_config.get("name", None)
-            kwargs = column_type_config.get("kwargs", {})
-
-            if column_type_name is None:
-                continue
-
-            handler = FILE_TYPE_REGISTRY.get(column_type_name)
-
-            if handler:
-                for idx in df.index:
-                    local_path = df.at[idx, col_name]
-
-                    if isinstance(local_path, str):
-                        try:
-                            df.at[idx, col_name] = handler(
-                                drive_service, local_path, **kwargs
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to upload {local_path}: {e}")
-                            df.at[idx, col_name] = "Upload Error"
-                    else:
-                        df.at[idx, col_name] = ""
-
-    set_with_dataframe(
+    frame: pd.DataFrame,
+    drive_service: Any,
+    columns_config: dict[str, dict[TColumnConfig, Any]],
+    batch_num: int,
+    batch_size: int,
+) -> None:
+    # Each retry starts from fresh cells, so already generated formulas are not
+    # accidentally treated as local file paths on the next upload attempt.
+    start_row = batch_num * batch_size
+    end_row = min(start_row + batch_size, len(frame))
+    set_with_dataframe_and_images(
         worksheet=worksheet,
-        dataframe=df,
-        include_index=include_index,
-        include_column_header=include_column_header,
-        row=row,
-        col=col,
-        resize=resize,
+        df=frame.iloc[start_row:end_row].copy(),
+        drive_service=drive_service,
+        columns_config=columns_config,
+        row=1 if batch_num == 0 else start_row + 2,
+        col=1,
+        include_index=False,
+        include_column_header=batch_num == 0,
+        resize=batch_num == 0,
     )
 
 
-def get_credentials(creds_path: Path | str, scopes: list[str]):
-
-    creds_path = Path(creds_path)
-    if not creds_path.exists():
-        raise FileNotFoundError(f"Credentials file not found: {creds_path}")
-
-    with open(creds_path, "r", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError:
-            data = {}
-
-    # 1. Service Account
-    if data.get("type") == "service_account":
-        logger.info("Using Service Account credentials")
-        return ServiceAccountCredentials.from_service_account_file(
-            creds_path, scopes=scopes
+def _send_frame(
+    worksheet: gspread.Worksheet,
+    frame: pd.DataFrame,
+    drive_service: Any,
+    columns_config: dict[str, dict[TColumnConfig, Any]],
+    sheet_config: dict[str, Any] | None,
+    batch_size: int,
+    delay_seconds: int,
+) -> None:
+    num_batches = (len(frame) + batch_size - 1) // batch_size
+    for batch_num in range(num_batches):
+        Retrying(wait=wait_fixed(delay_seconds), stop=stop_after_attempt(3))(
+            _upload_batch,
+            worksheet,
+            frame,
+            drive_service,
+            columns_config,
+            batch_num,
+            batch_size,
         )
-
-    # 2. OAuth 2.0 Client ID (User)
-    logger.info("Using OAuth 2.0 User credentials")
-    token_path = creds_path.parent / f"{creds_path.stem}_token.json"
-    creds = None
-
-    if token_path.exists():
-        creds = UserCredentials.from_authorized_user_file(str(token_path), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            logger.info("Refreshing expired token")
-            creds.refresh(Request())
+        logger.info("Send %s/%s", batch_num + 1, num_batches)
+        if batch_num == num_batches - 1:
+            logger.info("Start formatting")
+            format_worksheet(worksheet, frame, columns_config, sheet_config)
+            logger.info("End formatting")
         else:
-            logger.info("Starting OAuth flow (check browser)...")
-            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), scopes)
-            creds = flow.run_local_server(port=0)
-
-        with open(token_path, "w", encoding="utf-8") as token:
-            token.write(creds.to_json())
-
-    return creds
+            logger.info("Sleep %s before next batch processing", delay_seconds)
+            time.sleep(delay_seconds)
 
 
 def send_to_google(
@@ -382,137 +156,44 @@ def send_to_google(
     round: int | None = None,
     batch_size: int = 10,
     delay_seconds: int = 60,
-):
-
+) -> None:
     if columns_config is None:
         columns_config = {}
-
-    logger.info(f"Start collecting eval_results from {len(results)} files")
-    dfs = {
-        k: (v if isinstance(v, pd.DataFrame) else pd.DataFrame(v))
-        for k, v in results.items()
-    }
-    if round is not None:
-        dfs = {k: df.round(round) for k, df in dfs.items()}
-
-    dfs = {
-        k: (df if isinstance(df.index, pd.RangeIndex) else df.reset_index())
-        for k, df in dfs.items()
-    }
-    logger.info(f"End collecting eval_results from {len(results)} files")
-
-    SCOPES = [
+    logger.info("Start collecting eval_results from %s files", len(results))
+    frames = _dataframes(results, round)
+    logger.info("End collecting eval_results from %s files", len(results))
+    scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
-
-    credentials = get_credentials(creds_path, SCOPES)
-
-    gc = gspread.authorize(credentials)
+    credentials = get_credentials(creds_path, scopes)
+    client = gspread.authorize(credentials)
     drive_service = build("drive", "v3", credentials=credentials)
-
     try:
-        spreadsheet = gc.open_by_key(spreadsheet_id)
-        logger.info(f"Find spreadsheet {spreadsheet_id}")
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        logger.info("Find spreadsheet %s", spreadsheet_id)
     except gspread.SpreadsheetNotFound:
-        spreadsheet = gc.create("Validation Metrics")
-        logger.info(f"Create spreadsheet {spreadsheet_id}")
-
-    for val_set_name, df in dfs.items():
-        total_rows = len(df)
-        if total_rows == 0:
+        spreadsheet = client.create("Validation Metrics")
+        logger.info("Create spreadsheet %s", spreadsheet_id)
+    for name, frame in frames.items():
+        if len(frame) == 0:
             continue
-
-        num_batches = (total_rows + batch_size - 1) // batch_size
         logger.info(
-            f"Start processing {val_set_name} | length={total_rows} | batch_size={batch_size} | num_batches={num_batches}"
+            "Start processing %s | length=%s | batch_size=%s",
+            name,
+            len(frame),
+            batch_size,
         )
-        try:
-            worksheet = spreadsheet.worksheet(val_set_name)
-            worksheet.clear()
-            logger.info(f"Find worksheet {val_set_name}")
-        except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title=val_set_name, rows=100, cols=20)
-            logger.info(f"Create worksheet {val_set_name}")
-
-        for batch_num in range(num_batches):
-            start_row = batch_num * batch_size
-            end_row = min((batch_num + 1) * batch_size, total_rows)
-            batch_df = df.iloc[start_row:end_row]
-
-            start_cell = 1 if batch_num == 0 else (batch_num * batch_size + 2)
-
-            @retry(wait=wait_fixed(delay_seconds), stop=stop_after_attempt(3))
-            def upload_batch():
-
-                set_with_dataframe_and_images(
-                    worksheet=worksheet,
-                    df=batch_df.copy(),
-                    drive_service=drive_service,
-                    columns_config=columns_config,
-                    row=start_cell,
-                    col=1,
-                    include_index=False,
-                    include_column_header=True if batch_num == 0 else False,
-                    resize=(batch_num == 0),
-                )
-
-            upload_batch()
-            logger.info(
-                f"Send {batch_num+1}/{num_batches} | rows {start_row+1}-{end_row}"
-            )
-
-            if batch_num == num_batches - 1:
-                logger.info("✨ Start formatting...")
-
-                rules = get_conditional_format_rules(worksheet)
-                rules.clear()
-                worksheet.columns_auto_resize(0, len(df.columns))
-
-                for col_idx, col_name in enumerate(df.columns, start=1):
-                    col_letter = gspread.utils.rowcol_to_a1(1, col_idx)[:-1]
-                    cell_range = f"{col_letter}2:{col_letter}{total_rows+1}"
-
-                    col_config = columns_config.get(col_name, {})
-                    formatting_configs = col_config.get("formatting", [])
-
-                    for formatting_config in formatting_configs:
-                        fmt_name = formatting_config.get("name", "")
-                        kwargs = formatting_config.get("kwargs", {})
-
-                        if fmt_name in FORMATTING_REGISTRY:
-                            rule_func = FORMATTING_REGISTRY[fmt_name]
-                            rule = rule_func(cell_range, worksheet, **kwargs)
-                            if rule:
-                                rules.append(rule)
-
-                rules.save()
-
-                if sheet_config and "height" in sheet_config:
-                    set_row_heights(
-                        worksheet, [(f"2:{total_rows + 1}", sheet_config["height"])]
-                    )
-                else:
-                    set_row_heights(worksheet, [(f"2:{total_rows + 1}", 21)])
-
-                last_col_idx = len(df.columns)
-                last_col_letter = gspread.utils.rowcol_to_a1(1, last_col_idx)[:-1]
-
-                format_cell_range(
-                    worksheet,
-                    f"A2:{last_col_letter}{total_rows+1}",
-                    CellFormat(verticalAlignment="MIDDLE", horizontalAlignment="LEFT"),
-                )
-                format_cell_range(
-                    worksheet, f"A2:C{total_rows+1}", CellFormat(wrapStrategy="WRAP")
-                )
-
-                logger.info("✅ End formatting")
-
-            if batch_num < num_batches - 1:
-                logger.info(f"⏳ Sleep {delay_seconds} before next batch processing")
-                time.sleep(delay_seconds)
-
-        logger.info(f"✅ Successfully processed {val_set_name}")
-        logger.info(f"⏳ Sleep {delay_seconds} before next val_set")
+        worksheet = _worksheet(spreadsheet, name)
+        _send_frame(
+            worksheet,
+            frame,
+            drive_service,
+            columns_config,
+            sheet_config,
+            batch_size,
+            delay_seconds,
+        )
+        logger.info("Successfully processed %s", name)
+        logger.info("Sleep %s before next val_set", delay_seconds)
         time.sleep(delay_seconds)

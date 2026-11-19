@@ -1,4 +1,11 @@
-from .core import Callback, Stage, process_files, run_stages
+from .core import (
+    Callback,
+    ParallelStages,
+    SequenceStages,
+    Stage,
+    process_files,
+    run_stages,
+)
 from .default_stage import DefaultStage, StageConfig
 from .stage_utils import (
     CallbackConfig,
@@ -9,7 +16,15 @@ from .stage_utils import (
     SavePickleCallbackConfig,
     get_default_callbacks,
 )
-from .types import ErrorsDict, FilesWithMeta, PipesResult, StageResult
+from .types import (
+    BranchResult,
+    ErrorsDict,
+    FilesWithMeta,
+    PipesResult,
+    StageError,
+    StageItem,
+    StageResult,
+)
 from .utils import (
     calculate_stats,
     construct_relative_file,
@@ -23,6 +38,11 @@ from .utils import (
 __all__ = [
     "Callback",
     "Stage",
+    "StageItem",
+    "StageError",
+    "BranchResult",
+    "SequenceStages",
+    "ParallelStages",
     "DefaultStage",
     "StageConfig",
     "process_files",

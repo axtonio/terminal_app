@@ -1,12 +1,12 @@
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .core import Callback
+from .base import Callback
+from .metadata_io import read_metadata
+from .types import PipesResult
 from .utils import (
-    PipesResult,
     dataset_stats,
     save_meta_callback,
     save_pickle_callback,
@@ -20,7 +20,7 @@ class ProcessingConfig:
     annotations: Sequence[str | Path] | None
     output: Path | None
     max_workers: int
-    use_meta: bool
+    use_meta: bool | Sequence[str]
     meta_suffix: str
     prefix: str | None
     override_files: (
@@ -57,6 +57,7 @@ class CallbackConfig:
     dataset_stats_callback: DatasetStatsCallbackConfig | None
     save_meta_callback: SaveMetaCallbackConfig | None
     save_pickle_callback: SavePickleCallbackConfig | None
+    file_key: str | None = None
 
 
 class DatasetStatsCallback(Callback):
@@ -77,9 +78,17 @@ class DatasetStatsCallback(Callback):
         self.print_stats = print_stats
 
     def __call__(self, stages_result: PipesResult, stage_name: str | None) -> None:
+        stage_stats = {
+            (
+                stage_name
+                if stage_name is not None and name == stage_name.rsplit("/", 1)[-1]
+                else name
+            ): callback
+            for name, callback in self.stage_stats.items()
+        }
         dataset_stats(
             stages_result,
-            stage_stats=self.stage_stats,
+            stage_stats=stage_stats,
             failed_output=self.output / f"{self.prefix}{self.failed_output_name}.json",
             stat_output=self.output / f"{self.prefix}{self.stat_output_name}.json",
             stdout=logger.info,
@@ -102,6 +111,7 @@ class SaveMetaCallback(Callback):
         meta_suffix: str,
         prefix: str | None,
         statistics_key: str | None,
+        file_key: str | None = None,
     ):
         self.output = output
         self.prefix = prefix or ""
@@ -110,6 +120,7 @@ class SaveMetaCallback(Callback):
         self.for_all_files = for_all_files
         self.meta_suffix = meta_suffix
         self.statistics_key = statistics_key
+        self.file_key = file_key
 
     def __call__(self, stages_result: PipesResult, stage_name: str | None) -> None:
         save_meta_callback(
@@ -126,6 +137,7 @@ class SaveMetaCallback(Callback):
                 file.stem + self.meta_suffix
             ),
             stats_key=self.statistics_key,
+            file_key=self.file_key,
         )
 
     @property
@@ -181,6 +193,7 @@ def get_default_callbacks(config: CallbackConfig):
                 config.processing.meta_suffix,
                 prefix=config.processing.prefix,
                 statistics_key=config.statistics_key,
+                file_key=config.file_key,
             )
         )
     if config.save_pickle_callback is not None:
@@ -213,12 +226,11 @@ def process_meta_file(meta_file: Path, meta: dict[str, Any], stats_key: str):
     failed_filter: str | None = None
     passed: bool = True
 
-    saved_meta: dict = json.loads(
-        meta_file.read_text().replace("{json_path}", meta_file.parent.as_posix())
-    )
+    saved_meta = read_metadata(meta_file)
     failed_filter = saved_meta.get("error", None)
     if failed_filter:
-        meta.update(saved_meta)
+        meta[stats_key] = dict(saved_meta.get(stats_key) or {})
+        meta[stats_key]["error"] = failed_filter
         passed = False
         return meta, failed_filter, passed
     if (meta_data := saved_meta.get(stats_key, None)) is not None:

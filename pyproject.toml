@@ -4,21 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terminal_app"
+requires-python = ">=3.11"
 description = 'Library for terminal application'
 readme = "README.md"
 authors = [{ name = "Antonio Rodrigues", email = "axtonio.code@gmail.com" }]
 keywords = ["terminal_app", "mipt"]
 dependencies = [
+	"numpy",
 	"tqdm",
 	"certifi",
 	"natsort",
-	"pydantic",
+	"pydantic>=2",
 	"tabulate",
 	"paramiko",
 	"requests",
 	"hydra-core",
 	"python-dotenv",
-	"pytest_is_running",
 ]
 dynamic = ["version"]
 
@@ -38,11 +39,18 @@ version = { attr = "terminal_app.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error", "ignore::pytest.PytestUnraisableExceptionWarning"]
+filterwarnings = [
+    "error",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+    # selenium-wire vendors legacy mitmproxy; keep these exceptions scoped to it.
+    'ignore:pkg_resources is deprecated as an API:Warning:seleniumwire\.thirdparty\.mitmproxy\.contrib\.kaitaistruct\.tls_client_hello',
+    "ignore:'leaveWhitespace' deprecated:DeprecationWarning:seleniumwire\\.thirdparty\\.mitmproxy\\.command_lexer",
+]
 
 
 [project.optional-dependencies]
-request_utils = ["selenium", "selenium-wire", "paramiko"]
+dev = ["pytest", "setuptools", "types-requests", "types-tqdm", "types-tabulate", "google-api-python-client-stubs"]
+request_utils = ["selenium", "selenium-wire", "blinker<1.8", "setuptools<81", "paramiko"]
 google_sheets = [
 	"gspread",
 	"pandas",

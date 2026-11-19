@@ -1,0 +1,5 @@
+name = "terminal_app"
+targets = ["src"]
+import_roots = ["src"]
+packages = ["terminal_app"]
+type_dependencies = []

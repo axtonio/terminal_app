@@ -1,13 +1,11 @@
 import json
 import logging
 import os
-import sys
+from contextlib import redirect_stdout
 from enum import StrEnum
 from pprint import pprint
 from textwrap import dedent
 from typing import Any, Sequence
-
-_ORIG_STDOUT = sys.stdout
 
 
 def kill_all_output():
@@ -22,14 +20,8 @@ def kill_all_output():
     os.close(devnull_fd)
 
 
-class TerminalAppFormatting(StrEnum):
-    MDASH = "&#8212"
-    ANTONIO_TG = "@Antonio_Rodriges"
-    ANTONIO_NIKNAME = "axtonio"
-
-    @staticmethod
-    def hashtag(value: str) -> str:
-        return f"#{value}"
+class _HTMLFormatting:
+    """HTML text wrappers shared by terminal message formatting."""
 
     @staticmethod
     def bold(value: str) -> str:
@@ -55,34 +47,9 @@ class TerminalAppFormatting(StrEnum):
     def pre(value: str, language: str) -> str:
         return f'<pre language="{language}">{value}</pre>'
 
-    @staticmethod
-    def dict_formatting(data: dict[str, Any]) -> str:
-        return "\n\n".join([f"{name + ':'}\n{value}" for name, value in data.items()])
 
-    @staticmethod
-    def list_formatting(data: Sequence[Any], start: int = 1) -> str:
-        return "\n".join([f"{ind + start}. {x}" for ind, x in enumerate(data)])
-
-    @staticmethod
-    def notice(message: str) -> str:
-        return "Notice: " + message
-
-    @staticmethod
-    def error(message: str) -> str:
-        return "ERROR: " + message
-
-    @staticmethod
-    def command(command: str) -> str:
-        return f"/{command}"
-
-    @staticmethod
-    def commands(commands: list[Any]) -> str:
-        return "\n".join(
-            [
-                f"{getattr(command, 'command')} {TerminalAppFormatting.MDASH} {getattr(command, 'description')}"
-                for command in commands
-            ]
-        )
+class _StatusFormatting:
+    """Status labels for messages sent by command integrations."""
 
     @staticmethod
     def done_emoji(message: str) -> str:
@@ -109,12 +76,73 @@ class TerminalAppFormatting(StrEnum):
         return f"⏳ {message}"
 
 
-class AttentionPrint:
+class TerminalAppFormatting(_HTMLFormatting, _StatusFormatting, StrEnum):
+    MDASH = "&#8212"
+    ANTONIO_TG = "@Antonio_Rodriges"
+    ANTONIO_NIKNAME = "axtonio"
+
+    @staticmethod
+    def hashtag(value: str) -> str:
+        return f"#{value}"
+
+    @staticmethod
+    def dict_formatting(data: dict[str, Any]) -> str:
+        return "\n\n".join([f"{name + ':'}\n{value}" for name, value in data.items()])
+
+    @staticmethod
+    def list_formatting(data: Sequence[Any], start: int = 1) -> str:
+        return "\n".join([f"{ind + start}. {x}" for ind, x in enumerate(data)])
+
+    @staticmethod
+    def notice(message: str) -> str:
+        return "Notice: " + message
+
+    @staticmethod
+    def error(message: str) -> str:
+        return "ERROR: " + message
+
+    @staticmethod
+    def command(command: str) -> str:
+        return f"/{command}"
+
+    @staticmethod
+    def commands(commands: list[Any]) -> str:
+        return "\n".join(
+            [
+                f"{command.command} {TerminalAppFormatting.MDASH} {command.description}"
+                for command in commands
+            ]
+        )
+
+
+class _PrettyPrinting:
+    """Render structured values independently of attention block lifetime."""
+
+    @staticmethod
+    def pretty_list(data: list, exclude: list | None = None) -> str:
+        result: str = ""
+        for ind, item in enumerate(data):
+            if exclude is None or item not in exclude:
+                result += f"{ind}. {item}"
+                if ind != len(data) - 1:
+                    result += "\n"
+
+        return result
+
+    @staticmethod
+    def pretty_dict(data: Any):
+        print(json.dumps(data, sort_keys=False, ensure_ascii=False, indent=4))
+
+    @staticmethod
+    def pprint(data: Any):
+        pprint(data)
+
+
+class AttentionPrint(_PrettyPrinting):
 
     DEFAULT_LOG: str | None = None
     DEFAULT_CNT = 20
-    HTML = dedent(
-        """
+    HTML = dedent("""
     <html>
     <head>
         <title>
@@ -129,8 +157,7 @@ class AttentionPrint:
             {body}
         </body>
     </html>
-    """
-    ).strip()
+    """).strip()
 
     def __init__(self, name: str, cnt: int = DEFAULT_CNT, point: bool = False):
         self.name = name
@@ -144,17 +171,6 @@ class AttentionPrint:
         result += "\n"
         return result
 
-    @staticmethod
-    def pretty_list(data: list, exclude: list = []) -> str:
-        result: str = ""
-        for ind, item in enumerate(data):
-            if item not in exclude:
-                result += f"{ind}. {item}"
-                if ind != len(data) - 1:
-                    result += "\n"
-
-        return result
-
     def __enter__(self):
         if self.point is True:
             name = "Start" + " " + self.name
@@ -166,18 +182,10 @@ class AttentionPrint:
         return self
 
     @staticmethod
-    def pretty_dict(data: Any):
-        print(json.dumps(data, sort_keys=False, ensure_ascii=False, indent=4))
-
-    @staticmethod
-    def pprint(data: Any):
-        pprint(data)
-
-    @staticmethod
     def plog(
         data: Any,
         name: str = "data",
-        desc: dict[str, str] = {},
+        desc: dict[str, str] | None = None,
         path: str | None = DEFAULT_LOG,
         mode: str = "a",
         pretty_list: bool = False,
@@ -185,28 +193,22 @@ class AttentionPrint:
         if mode not in ["w", "a"]:
             print("Incorrect logging mode")
             return
-        if path:
-            with open(path, mode) as f:
-
-                sys.stdout = f
-                with AttentionPrint(name=name) as log:
-
-                    print(f"{name} = ", end="")
-                    if pretty_list:
-                        log.pprint(data)
-
-                    else:
-                        if isinstance(data, dict):
-                            log.pprint(data)
-                        else:
-                            print(data)
-
-                    if desc:
-                        print("\n")
-                        for key, value in desc.items():
-                            print(f"{key.upper()} ", value, end="\n")
-
-                sys.stdout = _ORIG_STDOUT
+        if not path:
+            return
+        with (
+            open(path, mode) as destination,
+            redirect_stdout(destination),
+            AttentionPrint(name=name) as log,
+        ):
+            print(f"{name} = ", end="")
+            if pretty_list or isinstance(data, dict):
+                log.pprint(data)
+            else:
+                print(data)
+            if desc:
+                print("\n")
+                for key, value in desc.items():
+                    print(f"{key.upper()} ", value, end="\n")
 
     def __exit__(self, type, value, traceback):
         print("\n" * 2)

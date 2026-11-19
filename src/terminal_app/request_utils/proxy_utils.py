@@ -1,6 +1,6 @@
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from seleniumwire import webdriver
+from seleniumwire.webdriver import Chrome
 
 
 def open_driver(
@@ -9,7 +9,7 @@ def open_driver(
     width: int = 1920,
     height: int = 1080,
     chromedriver_path: str = "/usr/bin/chromedriver",
-) -> webdriver.Chrome:
+) -> Chrome:
 
     proxy_auth = f"http://{proxy}"
 
@@ -36,7 +36,7 @@ def open_driver(
 
     service = Service(chromedriver_path)
 
-    driver = webdriver.Chrome(
+    driver = Chrome(
         service=service,
         options=chrome_options,
         seleniumwire_options=seleniumwire_options,

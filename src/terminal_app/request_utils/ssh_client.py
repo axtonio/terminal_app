@@ -1,17 +1,11 @@
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import paramiko
-import requests
 
-if TYPE_CHECKING:
-    import flask  # type: ignore
-
-from .curlify import Curlify
+from terminal_app.request_utils.curlify import Curlify, HttpRequest
 
 
 class SSHClient(paramiko.SSHClient):
@@ -40,9 +34,7 @@ class SSHClient(paramiko.SSHClient):
         if transport is not None:
             transport.set_keepalive(60)
 
-    def http_request(
-        self, request: requests.Request | requests.PreparedRequest | flask.Request
-    ) -> dict[str, Any]:
+    def http_request(self, request: HttpRequest) -> dict[str, Any]:
         ssh_stdin, ssh_stdout, ssh_stderr = self.exec_command(
             Curlify(request, localhost=True).to_curl()
         )

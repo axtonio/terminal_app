@@ -1,0 +1,17 @@
+{
+  "severity": {
+    "dead-code": "off",
+    "unused-export": "error"
+  },
+  "exclude_dirs": [
+    ".quality",
+    ".quality-venv",
+    ".ci-deps",
+    ".venv",
+    "venv",
+    "site-packages",
+    "build",
+    "dist",
+    "artifacts"
+  ]
+}
