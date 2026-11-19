@@ -6,6 +6,7 @@ import sys
 from subprocess import CompletedProcess, run
 from textwrap import dedent
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import requests
 
@@ -102,6 +103,19 @@ def test_existing_logger_clear_detaches_all_handlers(tmp_path):
     assert replacement.handlers == []
 
 
+def test_gpu_discovery_loads_optional_torch_only_when_needed(monkeypatch):
+    loader = Mock(
+        return_value=SimpleNamespace(cuda=SimpleNamespace(device_count=lambda: 3))
+    )
+    monkeypatch.setattr(utils.importlib, "import_module", loader)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,4")
+    assert utils.cuda_count() == 2
+    loader.assert_not_called()
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES")
+    assert utils.cuda_count() == 3
+    loader.assert_called_once_with("torch")
+
+
 def test_gpu_fallback_does_not_require_torch(monkeypatch):
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
 
@@ -188,17 +202,15 @@ def test_terminal_handler_can_append_non_utf8_messages(tmp_path):
         handler.close()
 
 
-def test_http_and_ssh_import_without_browser_extras(tmp_path):
+def test_core_imports_without_integration_extras(tmp_path):
     # A fresh interpreter prevents earlier integration tests from hiding eager imports.
     code = dedent("""
         import sys
-        sys.modules.update(selenium=None, seleniumwire=None, flask=None)
-        import requests
-        from terminal_app.request_utils import Curlify, SSHClient, open_driver
-        request = requests.Request("GET", "https://example.invalid/path").prepare()
-        assert Curlify(request).to_curl() == "curl -X GET https://example.invalid/path"
-        assert isinstance(SSHClient, type)
-        assert callable(open_driver)
+        sys.modules.update(selenium=None, seleniumwire=None, torch=None, gspread=None)
+        from terminal_app.processing_utils.core import run_stages
+        from terminal_app.utils.utils import cuda_count
+        assert callable(run_stages)
+        assert callable(cuda_count)
     """)
     result = run(
         [sys.executable, "-c", code],

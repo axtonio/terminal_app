@@ -39,7 +39,13 @@ version = { attr = "terminal_app.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error", "ignore::pytest.PytestUnraisableExceptionWarning"]
+filterwarnings = [
+    "error",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+    # selenium-wire vendors legacy mitmproxy; keep these exceptions scoped to it.
+    'ignore:pkg_resources is deprecated as an API:UserWarning:seleniumwire\.thirdparty\.mitmproxy\.contrib\.kaitaistruct\.tls_client_hello',
+    "ignore:'leaveWhitespace' deprecated:DeprecationWarning:seleniumwire\\.thirdparty\\.mitmproxy\\.command_lexer",
+]
 
 
 [project.optional-dependencies]

@@ -32,6 +32,11 @@ pip install "terminal_app[request_utils] @ git+https://github.com/axtonio/termin
 pip install "terminal_app[google_sheets] @ git+https://github.com/axtonio/terminal_app.git"
 ```
 
+The `request_utils` package imports its browser dependencies explicitly and
+requires the corresponding extra. Core processing and utilities do not require
+these integrations. GPU discovery loads PyTorch only when needed, if available;
+PyTorch is not a required dependency of this library.
+
 ## Python Usage
 
 ```python

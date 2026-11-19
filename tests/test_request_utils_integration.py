@@ -1,14 +1,13 @@
 """Request and browser adapters are exercised without network connections."""
 
-from importlib import import_module
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import Mock
 
 import pytest
 import requests
 
-proxy_module = import_module("terminal_app.request_utils.proxy_utils")
-Curlify = import_module("terminal_app.request_utils.curlify").Curlify
+import terminal_app.request_utils.proxy_utils as proxy_module
+from terminal_app.request_utils.curlify import Curlify
 
 
 def test_curlify_keeps_request_body_and_header_quoting():
@@ -44,26 +43,13 @@ def test_flask_compatible_request_does_not_require_flask():
 
 @pytest.mark.parametrize("fullscreen", [False, True])
 def test_browser_factory_receives_existing_proxy_and_options(monkeypatch, fullscreen):
-    options = pytest.importorskip("selenium.webdriver.chrome.options")
-    service = pytest.importorskip("selenium.webdriver.chrome.service")
     driver_factory = Mock()
-    modules = {
-        "selenium.webdriver.chrome.options": options,
-        "selenium.webdriver.chrome.service": service,
-        "seleniumwire.webdriver": SimpleNamespace(Chrome=driver_factory),
-    }
-    loader = Mock(side_effect=modules.__getitem__)
-    monkeypatch.setattr(proxy_module, "import_module", loader)
+    monkeypatch.setattr(proxy_module, "Chrome", driver_factory)
 
     result = proxy_module.open_driver(
         "user:secret@proxy.test:8000", fullscreen, 800, 600, "/custom/chromedriver"
     )
 
-    assert loader.call_args_list == [
-        call("selenium.webdriver.chrome.options"),
-        call("selenium.webdriver.chrome.service"),
-        call("seleniumwire.webdriver"),
-    ]
     assert result is driver_factory.return_value
     kwargs = driver_factory.call_args.kwargs
     assert kwargs["service"].path == "/custom/chromedriver"

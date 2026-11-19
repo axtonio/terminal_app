@@ -1,29 +1,16 @@
 """Local integration checks; Google requests and upload adapters are mocked."""
 
-from importlib import import_module
 from io import StringIO
 from unittest.mock import Mock
 
+import pandas as pd
 import pytest
 
-pd = pytest.importorskip("pandas")
-for dependency in (
-    "gspread",
-    "google.auth.transport.requests",
-    "google.oauth2.credentials",
-    "google.oauth2.service_account",
-    "google_auth_oauthlib.flow",
-    "googleapiclient.discovery",
-    "googleapiclient.http",
-    "gspread_dataframe",
-    "gspread_formatting",
-    "tenacity",
-):
-    pytest.importorskip(dependency)
-
-dataframe_module = import_module("terminal_app.google_sheets.dataframe")
-drive_module = import_module("terminal_app.google_sheets.drive")
-reports = import_module("terminal_app.google_sheets.send_metrics")
+import terminal_app.google_sheets.credentials as credentials_module
+import terminal_app.google_sheets.dataframe as dataframe_module
+import terminal_app.google_sheets.drive as drive_module
+import terminal_app.google_sheets.logging as logging_module
+import terminal_app.google_sheets.send_metrics as reports
 
 
 def test_batches_keep_offsets_headers_and_input_data(monkeypatch):
@@ -141,8 +128,6 @@ def test_original_public_google_helpers_still_resolve():
 def test_split_modules_emit_credentials_logs_with_original_configuration(
     monkeypatch, tmp_path
 ):
-    credentials_module = import_module("terminal_app.google_sheets.credentials")
-    logging_module = import_module("terminal_app.google_sheets.logging")
     destination = StringIO()
     monkeypatch.setattr(reports.stream_handler, "stream", destination)
     credential_factory = Mock(return_value=object())
