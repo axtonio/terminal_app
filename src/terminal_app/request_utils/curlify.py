@@ -1,9 +1,15 @@
 import json
 import urllib.parse
-from collections.abc import Mapping
+from collections.abc import Iterable
 from typing import Protocol
 
 import requests
+
+
+class HeadersLike(Protocol):
+    """Header pairs, including containers that preserve duplicate names."""
+
+    def items(self) -> Iterable[tuple[str, str]]: ...
 
 
 class RequestLike(Protocol):
@@ -16,7 +22,7 @@ class RequestLike(Protocol):
     def method(self) -> str: ...
 
     @property
-    def headers(self) -> Mapping[str, str]: ...
+    def headers(self) -> HeadersLike: ...
 
     @property
     def data(self) -> bytes: ...

@@ -42,6 +42,12 @@ def test_source_lookup_and_regular_file_replacement(tmp_path, monkeypatch):
     assert source(["first.json", "second.json"]) == {"new": 2}
 
 
+def test_source_preserves_distinct_numeric_and_string_yaml_keys(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("1: numeric\n'1': text\n")
+    assert source(config) == {1: "numeric", "1": "text"}
+
+
 def test_remote_configuration_uses_request_result(tmp_path, monkeypatch):
     monkeypatch.setattr(
         os, "environ", {"MODE_CONFIG_DIR": str(tmp_path), "TOKEN": "REMOTE"}
@@ -220,6 +226,14 @@ def test_core_imports_without_integration_extras(tmp_path):
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_relative_string_preserves_unresolvable_symlink_loop(tmp_path):
+    (tmp_path / "a").symlink_to("b")
+    (tmp_path / "b").symlink_to("a")
+    assert utils.to_relative({"artifact": "a"}, tmp_path, reverse=True) == {
+        "artifact": "a"
+    }
 
 
 def test_source_public_export_accepts_explicit_check_modes(tmp_path):

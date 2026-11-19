@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal, Sequence
 
 from terminal_app.utils.utils import annotations_to_path_list, list_cuda_devices
 
@@ -16,6 +16,8 @@ from .types import (
 from .worker_runtime import WorkerFunction, WorkerReplies
 from .worker_runtime import _worker as _worker
 from .worker_supervision import run_workers
+
+_InputFiles = Sequence[StageItem | tuple[Path | str, dict[str, Any]]]
 
 
 def _stdout(value):
@@ -91,24 +93,26 @@ def _collect_results(inputs: FilesWithMeta, replies: WorkerReplies) -> StageResu
 
 
 def process_files(
-    filtered_files,
+    filtered_files: _InputFiles | None,
     filter_one: WorkerFunction,
     desc: str,
     max_workers: int | None = None,
-    annotations=None,
-    override_files=None,
+    annotations: Path | str | Sequence[Path | str] | None = None,
+    override_files: _InputFiles | Callable[[], _InputFiles] | None = None,
     safety: bool = False,
     logging: bool = True,
-    start_method=None,
-    device: str = "cpu",
+    start_method: Literal["fork", "spawn"] | None = None,
+    device: Literal["cuda", "cpu"] = "cpu",
     read_json: bool = False,
     error_stdout: Callable[[str], Any] = _stdout,
     info_stdout: Callable[[str], Any] = _stdout,
-    postprocessing_func=None,
+    postprocessing_func: (
+        Callable[[FilesWithMeta, FilesWithMeta, ErrorsDict], StageResult] | None
+    ) = None,
     task_timeout: int = 300,
     process_timeout: int = 120,
-    prepare_item=None,
-):
+    prepare_item: Callable[[StageItem], StageItem] | None = None,
+) -> StageResult:
     """Process every input with a result or an item error.
 
     Timeouts stop the direct worker or isolated task process. Subprocesses

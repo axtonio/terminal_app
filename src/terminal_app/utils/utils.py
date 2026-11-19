@@ -306,7 +306,7 @@ def _relative_string(value: str, root: Path, reverse: bool) -> str:
         if reverse:
             return _restore_relative_string(path, root, value)
         return _make_relative(path, root) if path.exists() else value
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return value
 
 

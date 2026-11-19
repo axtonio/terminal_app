@@ -1,10 +1,11 @@
 import json
 import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
-from terminal_app.processing_utils.core import SequenceStages, run_stages
+from terminal_app.processing_utils.core import Callback, SequenceStages, run_stages
 from terminal_app.processing_utils.default_stage import DefaultStage, StageConfig
 from terminal_app.processing_utils.stage_utils import (
     ProcessingConfig,
@@ -44,7 +45,11 @@ def test_cache_policy_controls_symlink_inputs_and_callbacks_still_run(tmp_path: 
     link.symlink_to(source.name)
     node = build_stage(True)
     callbacks = []
-    node.callbacks = [lambda result, name: callbacks.append(name)]
+    callback = Mock(
+        spec=Callback, side_effect=lambda result, name: callbacks.append(name)
+    )
+    callback.name = "record"
+    node.callbacks = [callback]
     inputs = [StageItem("id", link, {"sample_statistics": {"value": 0}})]
     cached = run_stages(
         [SequenceStages("cad", [node])], filtered_files=inputs, use_meta=["cad"]

@@ -1,8 +1,9 @@
 import json
 from functools import partial
 from pathlib import Path
+from unittest.mock import Mock
 
-from terminal_app.processing_utils.base import Stage
+from terminal_app.processing_utils.base import Callback, Stage
 from terminal_app.processing_utils.pipeline import SequenceStages, run_stages
 from terminal_app.processing_utils.stage_utils import DatasetStatsCallback
 from terminal_app.processing_utils.types import StageItem
@@ -53,8 +54,35 @@ def test_nested_dataset_callback_uses_own_stage_despite_root_name(tmp_path):
 def test_default_callbacks_cannot_leak_between_custom_stage_instances():
     first, second = MetricStage(1), MetricStage(2)
     calls = []
-    first.callbacks += (lambda results, name: calls.append(name),)
+    callback = Mock(spec=Callback, side_effect=lambda results, name: calls.append(name))
+    callback.name = "record"
+    first.callbacks += (callback,)
     run_stages([first], filtered_files=[StageItem("one", Path("one"), {})])
     run_stages([second], filtered_files=[StageItem("two", Path("two"), {})])
     assert calls == ["metric"]
     assert not second.callbacks
+
+
+def test_stage_and_final_callbacks_report_progress_and_duration():
+    messages = []
+    stage_callback = Mock(spec=Callback)
+    stage_callback.name = "save_meta"
+    final_callback = Mock(spec=Callback)
+    final_callback.name = "dataset_stats"
+    stage = MetricStage(1)
+    stage.callbacks = [stage_callback]
+    results = run_stages(
+        [stage],
+        callbacks=[final_callback],
+        stdout=messages.append,
+        filtered_files=[StageItem("one", Path("one"), {})],
+    )
+    stage_callback.assert_called_once_with(results, "metric")
+    final_callback.assert_called_once_with(results, None)
+    assert messages[2:4] == ["Do stage callbacks", "Do save_meta callback"]
+    assert messages[4].startswith("save_meta callback duration: ")
+    assert messages[5:7] == [
+        "Do final callbacks after all stages",
+        "Do dataset_stats callback",
+    ]
+    assert messages[7].startswith("dataset_stats callback duration: ")

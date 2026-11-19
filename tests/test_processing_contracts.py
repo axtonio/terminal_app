@@ -1,8 +1,10 @@
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from terminal_app.processing_utils.core import (
+    Callback,
     ParallelStages,
     SequenceStages,
     Stage,
@@ -110,7 +112,9 @@ def test_composite_callback_updates_flow_forward_without_changing_child_snapshot
     def annotate(results, name):
         results[name][0][0].meta["annotation"] = "ready"
 
-    node = SequenceStages("parent", [EchoStage("child")], callbacks=[annotate])
+    callback = Mock(spec=Callback, side_effect=annotate)
+    callback.name = "annotate"
+    node = SequenceStages("parent", [EchoStage("child")], callbacks=[callback])
     result = run_stages(
         [node, EchoStage("after")], filtered_files=[StageItem("id", Path("input"))]
     )

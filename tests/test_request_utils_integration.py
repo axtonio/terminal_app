@@ -1,13 +1,26 @@
 """Request and browser adapters are exercised without network connections."""
 
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import requests
 
 import terminal_app.request_utils.proxy_utils as proxy_module
-from terminal_app.request_utils.curlify import Curlify
+from terminal_app.request_utils.curlify import Curlify, RequestLike
+
+
+class _Headers:
+    """Werkzeug-like header pairs without a Mapping interface."""
+
+    def items(self) -> tuple[tuple[str, str], ...]:
+        return (("X-Tag", "first"), ("X-Tag", "second"))
+
+
+class _FlaskCompatibleRequest:
+    method = "POST"
+    url = "https://example.test/path"
+    headers = _Headers()
+    data = b"hello"
 
 
 def test_curlify_keeps_request_body_and_header_quoting():
@@ -32,12 +45,11 @@ def test_prepared_request_body_is_text_or_absent(body):
     assert Curlify(request).body() == (None if body is None else "hello")
 
 
-def test_flask_compatible_request_does_not_require_flask():
-    request = SimpleNamespace(
-        method="POST", url="https://example.test/path", headers={}, data=b"hello"
-    )
+def test_flask_compatible_request_does_not_require_flask() -> None:
+    request: RequestLike = _FlaskCompatibleRequest()
     assert Curlify(request).to_curl() == (
-        "curl -X POST -d 'hello' https://example.test/path"
+        'curl -X POST -H "X-Tag: first" -H "X-Tag: second"'
+        " -d 'hello' https://example.test/path"
     )
 
 

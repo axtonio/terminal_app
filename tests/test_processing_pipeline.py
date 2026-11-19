@@ -1,8 +1,10 @@
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from terminal_app.processing_utils.core import (
+    Callback,
     ParallelStages,
     SequenceStages,
     Stage,
@@ -58,10 +60,14 @@ def test_nested_sequence_keeps_rejected_attempts_and_branch_errors():
     iou = FunctionStage("IoU", put("iou", {"value": None}, False))
     geometry = ParallelStages("geometry", [cd, iou], pass_condition=any)
     callbacks = []
+    callback = Mock(
+        spec=Callback, side_effect=lambda results, name: callbacks.append(name)
+    )
+    callback.name = "record"
     cad = SequenceStages(
         "cad",
         [code, geometry],
-        callbacks=[lambda results, name: callbacks.append(name)],
+        callbacks=[callback],
     )
     results = run_stages([cad], filtered_files=original)
     assert list(results) == [

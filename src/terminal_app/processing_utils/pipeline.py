@@ -269,6 +269,14 @@ def _parallel(node, incoming, path, results, stdout):
     return all_files, passed_files, errors
 
 
+def _run_callbacks(callbacks, results, stage_name, stdout):
+    for callback in callbacks:
+        stdout(f"Do {callback.name} callback")
+        start = time.monotonic()
+        callback(results, stage_name)
+        stdout(f"{callback.name} callback duration: {time.monotonic() - start}s")
+
+
 def _execute(stage, incoming, path, results, stdout):
     stdout(f"Do {path} stage")
     start = time.monotonic()
@@ -295,8 +303,8 @@ def _execute(stage, incoming, path, results, stdout):
     result = all_files, filtered, errors
     results[path] = result
     stdout(f"{path} stage duration: {time.monotonic() - start}s")
-    for callback in stage.callbacks:
-        callback(results, path)
+    stdout("Do stage callbacks")
+    _run_callbacks(stage.callbacks, results, path, stdout)
     return result
 
 
@@ -339,8 +347,9 @@ def run_stages(
         )
         for stage in stages:
             _, current, _ = _execute(stage, current, stage.name, results, stdout)
-        for callback in callbacks or []:
-            callback(results, None)
+        if callbacks:
+            stdout("Do final callbacks after all stages")
+            _run_callbacks(callbacks, results, None, stdout)
     finally:
         for path, stage in paths.items():
             stage._use_meta = previous[path]

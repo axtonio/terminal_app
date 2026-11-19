@@ -27,7 +27,7 @@ def parse_env_file(env_file_path: Path) -> dict[str, Any]:
         return {}
 
 
-def parse_yaml_file(yaml_file_path: Path) -> dict[str, Any]:
+def parse_yaml_file(yaml_file_path: Path) -> dict[Any, Any]:
     try:
         with initialize_config_dir(
             config_dir=yaml_file_path.parent.as_posix(),
@@ -38,7 +38,7 @@ def parse_yaml_file(yaml_file_path: Path) -> dict[str, Any]:
         result = OmegaConf.to_container(config, resolve=True)
         if not isinstance(result, dict):
             raise TypeError("The configuration must contain a mapping")
-        return {str(key): value for key, value in result.items()}
+        return result
     except Exception:
         TERMINAL_APP_LOGGER.error("Error parsing %s", yaml_file_path)
         return {}
