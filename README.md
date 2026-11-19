@@ -55,13 +55,40 @@ print(params["all_params"] is params)
 - `terminal_app.processing_utils` for staged file processing pipelines.
 - `terminal_app.utils` for small reusable helpers and formatting utilities.
 
-## Tests
+## Development
 
-Run the test suite from the project environment:
+Use Python 3.11 and an isolated development environment. Install the optional
+integrations too: quality checks inspect all production modules, including the
+browser, SSH and Google Sheets helpers.
 
 ```bash
-pytest
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev,request_utils,google_sheets]"
+make format PYTHON=python
+make quality PYTHON=python
+python -m pytest -q
 ```
+
+The repository vendors the shared Templates Python quality profile in
+`.quality/`; its release is recorded in `.quality/VERSION`. `make format` sorts
+imports and formats production code. `make quality` checks formatting, imports,
+types, complexity, module size, architecture and unused code without changing
+source files. The profile covers `src`; tests also provide references for the
+unused-code analysis.
+
+Analyzers and their pinned dependencies are installed automatically in a separate
+`.quality-venv`. Keep the application's environment active when running either
+Make target. Review formatting changes before committing. To run the same
+quality check automatically before commits:
+
+```bash
+.quality-venv/bin/pre-commit install
+```
+
+GitHub Actions runs `make quality PYTHON=python` and the test suite on pull
+requests and pushes to `main`, using Python 3.11. These tests run locally without
+service credentials, browser sessions or calls to external integrations.
 
 ## Composable processing
 

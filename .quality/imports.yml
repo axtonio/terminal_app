@@ -1,0 +1,52 @@
+id: strict-initial-imports
+language: Python
+severity: error
+message: Imports must be in the initial module block after the optional docstring.
+utils:
+  import:
+    any:
+    - kind: import_statement
+    - kind: import_from_statement
+    - kind: future_import_statement
+  docstring:
+    kind: expression_statement
+    has:
+      any:
+      - kind: string
+      - kind: concatenated_string
+      - kind: parenthesized_expression
+    nthChild:
+      position: 1
+      ofRule:
+        not:
+          kind: comment
+    not:
+      has:
+        stopBy: end
+        any:
+        - not:
+            any:
+            - kind: string
+            - kind: concatenated_string
+            - kind: parenthesized_expression
+            - kind: string_start
+            - kind: string_content
+            - kind: string_end
+            - kind: escape_sequence
+            - kind: comment
+            - regex: ^[()]$
+        - kind: string_start
+          regex: (?i)[bf]
+rule:
+  matches: import
+  any:
+  - not:
+      inside:
+        kind: module
+  - follows:
+      stopBy: end
+      not:
+        any:
+        - matches: import
+        - matches: docstring
+        - kind: comment
