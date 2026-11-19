@@ -10,3 +10,5 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Body", "fastapi.File"]
 [lint.flake8-tidy-imports.banned-api]
 "__future__.annotations".msg = "Use runtime annotations."
 "sys.path.insert".msg = "Install the package or configure the test import path."
+"importlib.import_module".msg = "Use explicit imports; dynamic loading requires an explicitly approved, documented exception."
+"builtins.__import__".msg = "Use explicit imports instead of dynamic loading."

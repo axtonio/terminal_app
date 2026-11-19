@@ -57,8 +57,8 @@ def cuda_count() -> int:
         if ids:
             return len(ids)
     try:
-        # Torch is optional and expensive to import; resolve it only on GPU discovery.
-        torch = importlib.import_module("torch")
+        # PyTorch is optional and expensive; GPU discovery alone may load it.
+        torch = importlib.import_module("torch")  # noqa: TID251
         return int(torch.cuda.device_count())
     except Exception as error:
         logger.warning(

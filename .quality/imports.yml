@@ -50,3 +50,11 @@ rule:
         - matches: import
         - matches: docstring
         - kind: comment
+---
+id: no-dynamic-builtin-import
+language: Python
+severity: error
+message: Use explicit imports instead of referencing the dynamic __import__ builtin.
+rule:
+  kind: identifier
+  regex: ^__import__$

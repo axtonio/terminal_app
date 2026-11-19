@@ -82,6 +82,10 @@ types, complexity, module size, architecture and unused code without changing
 source files. The profile covers `src`; tests also provide references for the
 unused-code analysis.
 
+Dynamic imports through `importlib.import_module` and `__import__` are rejected,
+including import aliases. GPU discovery has one documented line exception for
+optional PyTorch; the rest of the module remains checked.
+
 Analyzers and their pinned dependencies are installed automatically in a separate
 `.quality-venv`. Keep the application's environment active when running either
 Make target. Review formatting changes before committing. To run the same
