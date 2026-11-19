@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import ast
 import concurrent.futures
 import glob
+import importlib
 import json
 import logging
 import multiprocessing as mp
@@ -11,15 +10,16 @@ import random
 import re
 import shutil
 import string
+import subprocess
 from collections import UserDict
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar, overload
+from typing import Any, Callable, Literal, Sequence, TypeVar
 
 import tqdm
 from natsort import natsorted, ns
 
-from terminal_app.logging import TERMINAL_APP_LOGGER
+from terminal_app.logging.logging import TERMINAL_APP_LOGGER
 
 T = TypeVar("T")
 
@@ -31,43 +31,40 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-def cuda_count() -> int:
-    vis = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if vis is not None:
-        ids = [x for x in vis.split(",") if x.strip() != ""]
-        if len(ids) > 0:
-            return len(ids)
+def _nvidia_gpu_count() -> int:
     try:
-        import torch  # type: ignore
-
-        return torch.cuda.device_count()
-    except Exception as ex:
-        logger.warning(
-            f"Error getting CUDA count with torch: {ex}. Trying nvidia-smi..."
-        )
-
-    try:
-        import subprocess
-
         result = subprocess.run(
-            ["nvidia-smi", "--list-gpus"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
+            ["nvidia-smi", "--list-gpus"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
-            n_gpus = len([line for line in result.stdout.splitlines() if "GPU" in line])
-            if n_gpus > 0:
-                return n_gpus
-
+            count = sum("GPU" in line for line in result.stdout.splitlines())
+            if count:
+                return count
         logger.warning(
-            f"nvidia-smi did not run successfully: {result.stderr}. Returning 0."
+            "nvidia-smi did not run successfully: %s. Returning 0.", result.stderr
         )
-        return 0
-    except Exception as ex:
-        logger.warning(f"Error getting CUDA count with nvidia-smi: {ex}. Returning 0.")
-        return 0
+    except Exception as error:
+        logger.warning(
+            "Error getting CUDA count with nvidia-smi: %s. Returning 0.", error
+        )
+    return 0
+
+
+def cuda_count() -> int:
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None:
+        ids = [value for value in visible.split(",") if value.strip()]
+        if ids:
+            return len(ids)
+    try:
+        # Torch is optional and expensive to import; resolve it only on GPU discovery.
+        torch = importlib.import_module("torch")
+        return int(torch.cuda.device_count())
+    except Exception as error:
+        logger.warning(
+            "Error getting CUDA count with torch: %s. Trying nvidia-smi...", error
+        )
+    return _nvidia_gpu_count()
 
 
 def list_cuda_devices():
@@ -83,7 +80,7 @@ def code_is_valid(code: str):
         return False
 
 
-class AllParams(UserDict):
+class AllParams(UserDict[Any, Any]):
 
     def __init__(self, mapping=None, /, **kwargs):
         if mapping is not None:
@@ -100,17 +97,6 @@ class AllParams(UserDict):
             item = self
 
         return super().__setitem__(key, item)
-
-    @overload
-    def __getitem__(self, key: Literal["all_params"]) -> AllParams:
-        pass
-
-    @overload
-    def __getitem__(self, key: Any) -> Any:
-        pass
-
-    def __getitem__(self, key: Any) -> Any:
-        return super().__getitem__(key)
 
 
 def chunks(array: list[T], size: int) -> list[list[T]]:
@@ -210,13 +196,10 @@ def fast_copy(
     if max_workers is None:
         max_workers = mp.cpu_count()
 
-    def copy_file(src: Path | str, dst: Path | str) -> None:
-        shutil.copy2(src, dst)
-
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(
-                copy_file,
+                shutil.copy2,
                 file,
                 (
                     dest_folder / relative_func(file)
@@ -237,47 +220,40 @@ def fast_copy(
                     pbar.update(1)
 
 
+def _annotation_file(candidate: Path, read_json: bool) -> list[Path]:
+    if candidate.suffix.lower() == ".json" and read_json:
+        entries = json.loads(candidate.read_text(encoding="utf-8"))
+        base = candidate.parent
+    else:
+        entries = [candidate]
+        base = Path.cwd()
+    if not isinstance(entries, list):
+        raise TypeError(
+            f"Annotation file {candidate} must contain a JSON array or newline list"
+        )
+    resolved = []
+    for entry in entries:
+        if isinstance(entry, (str, Path)):
+            path = Path(entry)
+            resolved.append(path if path.is_absolute() else base / path)
+    if not resolved:
+        raise ValueError(f"No mesh paths could be resolved from {candidate}")
+    return resolved
+
+
 def annotations_to_path_list(
     annotations: Path | str | Sequence[Path | str], read_json: bool = False
 ) -> list[Path]:
-
-    def _has_glob_tokens(text: Any) -> bool:
-        text = str(text)
-        return any(token in text for token in ("*", "?", "[", "]"))
-
-    def _resolve_mesh_path(entry: str, base_dir: Path) -> str:
-        path = Path(entry)
-        if not path.is_absolute():
-            path = base_dir / path
-        return path.as_posix()
-
-    if isinstance(annotations, Sequence) and not isinstance(annotations, str):
+    if not isinstance(annotations, (str, Path)):
         result = []
         for item in annotations:
             result.extend(annotations_to_path_list(item))
         return result
-
     candidate = Path(annotations)
-    if candidate.exists() and not _has_glob_tokens(annotations):
-        if candidate.suffix.lower() == ".json" and read_json:
-            base_dir = candidate.parent
-            annotations = json.loads(candidate.read_text(encoding="utf-8"))
-        else:
-            base_dir = Path.cwd()
-            annotations = [str(annotations)]
-        if not isinstance(annotations, list):
-            raise TypeError(
-                f"Annotation file {candidate} must contain a JSON array or newline list"
-            )
-        resolved = [
-            Path(_resolve_mesh_path(str(item), base_dir))
-            for item in annotations
-            if isinstance(item, (str, Path))
-        ]
-        if not resolved:
-            raise ValueError(f"No mesh paths could be resolved from {candidate}")
-        return resolved
-
+    if candidate.exists() and not any(
+        token in str(annotations) for token in ("*", "?", "[", "]")
+    ):
+        return _annotation_file(candidate, read_json)
     matches = glob.glob(str(annotations))
     if not matches:
         raise FileNotFoundError(
@@ -294,43 +270,51 @@ def recursive_map(data: Any, func: Callable[[Any], Any]) -> Any:
     return func(data)
 
 
+def _make_relative(path: Path | str, root: Path) -> str:
+    try:
+        return (
+            Path("{json_path}") / os.path.relpath(Path(path).resolve(), root)
+        ).as_posix()
+    except ValueError:
+        return Path(path).as_posix()
+
+
+def _resolve_relative_path(path: Path, root: Path) -> str:
+    return path.as_posix() if path.is_absolute() else (root / path).resolve().as_posix()
+
+
+def _restore_relative_string(path: Path, root: Path, original: str) -> str:
+    resolved = (root / path).resolve()
+    if not path.is_absolute() and resolved.exists():
+        return resolved.as_posix()
+    return original
+
+
+def _relative_string(value: str, root: Path, reverse: bool) -> str:
+    try:
+        path = Path(value)
+        if reverse:
+            return _restore_relative_string(path, root, value)
+        return _make_relative(path, root) if path.exists() else value
+    except (OSError, ValueError):
+        return value
+
+
+def _relative_item(value: Any, root: Path, reverse: bool) -> Any:
+    if isinstance(value, Path):
+        return (
+            _resolve_relative_path(value, root)
+            if reverse
+            else _make_relative(value, root)
+        )
+    if isinstance(value, str):
+        return _relative_string(value, root, reverse)
+    return value
+
+
 def to_relative(data: Any, root: Path | str, reverse: bool = False) -> Any:
-    root = Path(root).resolve()
-
-    def _resolve_path(p: Path | str) -> str:
-        p_obj = Path(p)
-        if p_obj.is_absolute():
-            return p_obj.as_posix()
-        return (root / p).resolve().as_posix()
-
-    def _make_relative(p: Path | str) -> str:
-        try:
-            return (
-                Path("{json_path}") / os.path.relpath(Path(p).resolve(), root)
-            ).as_posix()
-        except ValueError:
-            return Path(p).as_posix()
-
-    def _process_item(obj: Any) -> Any:
-        if isinstance(obj, Path):
-
-            return _resolve_path(obj) if reverse else _make_relative(obj)
-
-        if isinstance(obj, str):
-            try:
-                if reverse:
-                    resolved = (root / obj).resolve()
-                    if not Path(obj).is_absolute() and resolved.exists():
-                        return resolved.as_posix()
-                else:
-                    if Path(obj).exists():
-                        return _make_relative(obj)
-            except Exception:
-                return obj
-
-        return obj
-
-    return recursive_map(data, _process_item)
+    base = Path(root).resolve()
+    return recursive_map(data, lambda value: _relative_item(value, base, reverse))
 
 
 def link_file(link: Path, output_path: Path):

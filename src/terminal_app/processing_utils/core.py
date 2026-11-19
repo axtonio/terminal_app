@@ -3,7 +3,8 @@
 from .base import Callback, Stage
 from .composites import ParallelStages, SequenceStages, first_successful_path
 from .pipeline import cache_enabled, run_stages
-from .workers import _worker, process_files
+from .workers import _worker as _worker
+from .workers import process_files
 
 __all__ = [
     "Callback",

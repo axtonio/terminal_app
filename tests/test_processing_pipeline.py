@@ -227,3 +227,12 @@ def test_one_stage_instance_cannot_receive_two_cache_policies():
             [SequenceStages("one", [stage]), SequenceStages("two", [stage])],
             filtered_files=[],
         )
+
+
+def test_invalid_input_restores_original_cache_policy():
+    stage = FunctionStage("leaf", put("leaf", 1))
+    stage._use_meta = False
+    inputs = [StageItem("same", Path("one"), {}), StageItem("same", Path("two"), {})]
+    with pytest.raises(ValueError, match="Duplicate item_id"):
+        run_stages([stage], filtered_files=inputs, use_meta=True)
+    assert stage._use_meta is False

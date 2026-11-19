@@ -48,9 +48,17 @@ class BranchResult:
     errors: ErrorsDict
 
 
+def _legacy_item(value, available: dict[Path, list[str]], require_identity: bool):
+    path, meta = value
+    ids = available.get(Path(path), [])
+    if require_identity and not ids:
+        raise ValueError("A changed output path must retain its StageItem.item_id")
+    return StageItem(ids.pop(0) if ids else uuid4().hex, Path(path), meta)
+
+
 def normalize_items(files, source: FilesWithMeta | None = None) -> FilesWithMeta:
     """Accept legacy path/meta pairs only when their identity is unambiguous."""
-    available = {}
+    available: dict[Path, list[str]] = {}
     for item in source or []:
         available.setdefault(item.path, []).append(item.item_id)
     result = []
@@ -58,13 +66,7 @@ def normalize_items(files, source: FilesWithMeta | None = None) -> FilesWithMeta
         if isinstance(value, StageItem):
             item = value
         else:
-            path, meta = value
-            ids = available.get(Path(path), [])
-            if source is not None and not ids:
-                raise ValueError(
-                    "A changed output path must retain its StageItem.item_id"
-                )
-            item = StageItem(ids.pop(0) if ids else uuid4().hex, Path(path), meta)
+            item = _legacy_item(value, available, source is not None)
         result.append(item)
     ids = [item.item_id for item in result]
     if len(set(ids)) != len(ids):

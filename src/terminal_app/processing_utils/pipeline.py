@@ -2,10 +2,12 @@ import time
 from copy import deepcopy
 from typing import Any, Callable, Sequence
 
+import terminal_app.processing_utils.composites as composites
+
 from .base import Callback, Stage
-from .composites import ParallelStages, SequenceStages, merge_branch_metadata
 from .types import (
     BranchResult,
+    ErrorsDict,
     FilesWithMeta,
     PipesResult,
     StageError,
@@ -28,7 +30,7 @@ def _stage_paths(stages: Sequence[Stage], prefix: str = "") -> dict[str, Stage]:
         names.add(stage.name)
         path = f"{prefix}/{stage.name}" if prefix else stage.name
         paths[path] = stage
-        if isinstance(stage, SequenceStages):
+        if isinstance(stage, composites.SequenceStages):
             paths.update(_stage_paths(stage.stages, path))
     return paths
 
@@ -52,7 +54,7 @@ def _validate_policy(policy, paths):
 
 
 def _merge_errors(*groups):
-    result = {}
+    result: ErrorsDict = {}
     for errors in groups:
         for key, error in errors.items():
             candidate = key
@@ -64,24 +66,30 @@ def _merge_errors(*groups):
     return result
 
 
-def _normalize_result(result, source, path):
-    all_files, filtered, raw_errors = result
-    all_files = normalize_items(all_files, source)
+def _add_stage_error(errors, key, error: StageError, by_id, path):
+    if error.stage:
+        errors[key] = error
+    else:
+        add_error(errors, by_id[error.item_id], path, error.message)
+
+
+def _normalize_errors(raw_errors, all_files, path) -> ErrorsDict:
     by_id = {item.item_id: item for item in all_files}
-    filtered = normalize_items(filtered, all_files)
-    errors = {}
+    errors: ErrorsDict = {}
     for key, error in raw_errors.items():
         if isinstance(error, StageError):
-            if error.stage:
-                errors[key] = error
-            else:
-                add_error(errors, by_id[error.item_id], path, error.message)
+            _add_stage_error(errors, key, error, by_id, path)
         else:
             matches = [item for item in all_files if item.path == key]
             if not matches:
                 raise ValueError(f"Error references an unknown item: {key}")
             for item in matches:
                 add_error(errors, item, path, str(error))
+    return errors
+
+
+def _restore_missing(all_files, source, path, errors):
+    by_id = {item.item_id: item for item in all_files}
     for item in source or []:
         if item.item_id not in by_id:
             missing = deepcopy(item)
@@ -92,6 +100,15 @@ def _normalize_result(result, source, path):
         expected = {item.item_id for item in source}
         if set(by_id) != expected:
             raise ValueError(f"Stage {path} changed item identities")
+    return by_id
+
+
+def _normalize_result(result, source, path) -> StageResult:
+    all_files, filtered, raw_errors = result
+    all_files = normalize_items(all_files, source)
+    filtered = normalize_items(filtered, all_files)
+    errors = _normalize_errors(raw_errors, all_files, path)
+    by_id = _restore_missing(all_files, source, path, errors)
     if any(item.item_id not in by_id for item in filtered):
         raise ValueError(f"Stage {path} passed an item absent from all_files")
     return all_files, [by_id[item.item_id] for item in filtered], errors
@@ -110,11 +127,44 @@ def _sequence(node, incoming, path, results, stdout):
     return list(accumulated.values()), current or [], errors
 
 
+def _branch_results(original, branches):
+    return [
+        BranchResult(
+            name,
+            items[original.item_id],
+            original.item_id in passed,
+            {
+                key: error
+                for key, error in branch_errors.items()
+                if error.item_id == original.item_id
+            },
+        )
+        for name, items, passed, branch_errors in branches
+    ]
+
+
+def _merge_item(node, original, branches, path, errors):
+    branch_results = _branch_results(original, branches)
+    merged = deepcopy(original)
+    try:
+        merged.meta = composites.merge_branch_metadata(original.meta, branch_results)
+        passed = bool(node.pass_condition([branch.passed for branch in branch_results]))
+        if passed:
+            output = node.output_path_selector(branch_results)
+            if output is None:
+                raise ValueError("Output path selector returned no path")
+            merged.path = type(original.path)(output)
+        return merged, passed
+    except Exception as exc:
+        add_error(errors, merged, path, str(exc))
+        return merged, False
+
+
 def _parallel(node, incoming, path, results, stdout):
     if incoming is None:
         raise ValueError("ParallelStages requires an explicit input selection")
     branches = []
-    errors = {}
+    errors: ErrorsDict = {}
     for child in node.stages:
         child_path = f"{path}/{child.name}"
         result = _execute(child, deepcopy(incoming), child_path, results, stdout)
@@ -130,41 +180,17 @@ def _parallel(node, incoming, path, results, stdout):
         errors.update(child_errors)
     all_files, passed_files = [], []
     for original in incoming:
-        branch_results = [
-            BranchResult(
-                name,
-                items[original.item_id],
-                original.item_id in passed,
-                {
-                    key: error
-                    for key, error in branch_errors.items()
-                    if error.item_id == original.item_id
-                },
-            )
-            for name, items, passed, branch_errors in branches
-        ]
-        merged = deepcopy(original)
-        try:
-            merged.meta = merge_branch_metadata(original.meta, branch_results)
-            passed = bool(
-                node.pass_condition([branch.passed for branch in branch_results])
-            )
-            if passed:
-                output = node.output_path_selector(branch_results)
-                if output is None:
-                    raise ValueError("Output path selector returned no path")
-                merged.path = type(original.path)(output)
-                passed_files.append(merged)
-        except Exception as exc:
-            add_error(errors, merged, path, str(exc))
+        merged, passed = _merge_item(node, original, branches, path, errors)
         all_files.append(merged)
+        if passed:
+            passed_files.append(merged)
     return all_files, passed_files, errors
 
 
 def _execute(stage, incoming, path, results, stdout):
     stdout(f"Do {path} stage")
     start = time.monotonic()
-    transition_errors = {}
+    transition_errors: ErrorsDict = {}
     if incoming is not None:
         transitioned = stage.transition(deepcopy(incoming), deepcopy(incoming), {})
         transitioned_all, incoming, transition_errors = _normalize_result(
@@ -172,9 +198,9 @@ def _execute(stage, incoming, path, results, stdout):
         )
     else:
         transitioned_all = None
-    if isinstance(stage, ParallelStages):
+    if isinstance(stage, composites.ParallelStages):
         result = _parallel(stage, incoming, path, results, stdout)
-    elif isinstance(stage, SequenceStages):
+    elif isinstance(stage, composites.SequenceStages):
         result = _sequence(stage, incoming, path, results, stdout)
     else:
         result = _normalize_result(stage(deepcopy(incoming)), incoming, path)
@@ -191,6 +217,25 @@ def _execute(stage, incoming, path, results, stdout):
     return result
 
 
+def _configure_cache(paths, use_meta):
+    if len({id(stage) for stage in paths.values()}) != len(paths):
+        raise ValueError("Each stage instance must belong to exactly one tree position")
+    if use_meta is not None:
+        _validate_policy(use_meta, paths)
+    policies = {}
+    for path, stage in paths.items():
+        policy = use_meta
+        config = getattr(stage, "config", None)
+        if policy is None and config is not None:
+            policy = config.processing.use_meta
+            _validate_policy(policy, paths)
+        policies[path] = cache_enabled(policy, path) if policy is not None else None
+    previous = {path: stage._use_meta for path, stage in paths.items()}
+    for path, stage in paths.items():
+        stage._use_meta = policies[path]
+    return previous
+
+
 def run_stages(
     stages: Sequence[Stage],
     callbacks: Sequence[Callback] | None = None,
@@ -205,22 +250,12 @@ def run_stages(
     Leaf callbacks run even when a leaf restores cached metadata.
     """
     paths = _stage_paths(stages)
-    if len({id(stage) for stage in paths.values()}) != len(paths):
-        raise ValueError("Each stage instance must belong to exactly one tree position")
-    if use_meta is not None:
-        _validate_policy(use_meta, paths)
-    previous = {}
-    for path, stage in paths.items():
-        policy = use_meta
-        config = getattr(stage, "config", None)
-        if policy is None and config is not None:
-            policy = config.processing.use_meta
-            _validate_policy(policy, paths)
-        previous[path] = stage._use_meta
-        stage._use_meta = cache_enabled(policy, path) if policy is not None else None
-    results = {}
-    current = normalize_items(filtered_files) if filtered_files is not None else None
+    previous = _configure_cache(paths, use_meta)
+    results: PipesResult = {}
     try:
+        current = (
+            normalize_items(filtered_files) if filtered_files is not None else None
+        )
         for stage in stages:
             _, current, _ = _execute(stage, current, stage.name, results, stdout)
         for callback in callbacks or []:

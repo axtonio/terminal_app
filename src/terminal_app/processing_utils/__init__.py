@@ -1,8 +1,8 @@
 from .core import (
     Callback,
-    Stage,
-    SequenceStages,
     ParallelStages,
+    SequenceStages,
+    Stage,
     process_files,
     run_stages,
 )

@@ -1,21 +1,26 @@
 import json
 import logging
-import os
 import pickle
 from pathlib import Path
 from typing import Any, Callable
 
-from terminal_app.utils import to_relative
-
+from .metadata_io import (
+    MetaFileSettings,
+    default_meta_path,
+    json_default,
+    save_item_metadata,
+    write_json,
+)
+from .statistics import calculate_stats
+from .statistics import find_closest_path as find_closest_path
 from .types import (
+    ErrorsDict,
     FilesWithMeta,
     PipesResult,
-    StageResult,
     StageItem,
-    StageError,
+    StageResult,
     normalize_items,
 )
-from .statistics import calculate_stats, find_closest_path
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -23,13 +28,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
-
-
-def _json_default(obj: Any) -> str:
-
-    if isinstance(obj, Path):
-        return obj.as_posix()
-    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
 def construct_relative_file(
@@ -45,7 +43,7 @@ def construct_relative_file(
 def files_transition(
     all_files: FilesWithMeta,
     filtered_files: FilesWithMeta,
-    errors: dict[Path, str],
+    errors: ErrorsDict,
     construct_relative_file: Callable[[Path], Path],
 ) -> StageResult:
 
@@ -92,10 +90,6 @@ def save_pickle_callback(
     logger.info(f"Save {output_path}")
 
 
-def _default_each_file_output_path(file: Path) -> Path:
-    return file.with_name(f"{file.stem}_meta.json")
-
-
 def save_meta_callback(
     stages: PipesResult,
     stage_name: str | None,
@@ -113,84 +107,22 @@ def save_meta_callback(
         assert (
             stats_key is not None
         ), "stats_key is required when stage_name is provided"
-
     stage_index = list(stages.keys()).index(stage_name) if stage_name else -1
-    meta: list[Any] = [
-        m for _, m in list(stages.values())[stage_index][0 if not filtered_only else 1]  # type: ignore
-    ]
-    errors = list(stages.values())[stage_index][2]
+    all_files, filtered, errors = list(stages.values())[stage_index]
+    selected = filtered if filtered_only else all_files
     if for_each_file:
-        for file, file_meta in list(stages.values())[stage_index][  # type: ignore
-            0 if not filtered_only else 1
-        ]:
-            output_json_path = (
-                each_file_output_path(file)
-                if each_file_output_path
-                else _default_each_file_output_path(file)
-            )
-            if output_json_path.is_symlink():
-                continue
-
-            file_meta_for_update = {}
-            if output_json_path.exists():
-                if not replace_if_exists and not update_if_exists:
-                    continue
-                if update_if_exists:
-                    file_meta_for_update = json.loads(output_json_path.read_text())
-
-            # A leaf owns only its statistics section. Never restore stale
-            # sibling sections from its pre-execution metadata snapshot.
-            update = (
-                {stats_key: file_meta[stats_key]}
-                if stats_key and stats_key in file_meta
-                else {}
-            )
-            if stats_key is None:
-                update = dict(file_meta)
-            else:
-                owned_file_key = (
-                    file_key or stats_key.removesuffix("_statistics") + "_file"
-                )
-                if owned_file_key in file_meta:
-                    update[owned_file_key] = file_meta[owned_file_key]
-            if not update:
-                messages = [
-                    error.message if isinstance(error, StageError) else str(error)
-                    for key, error in errors.items()
-                    if (
-                        error.path == file
-                        if isinstance(error, StageError)
-                        else key == file
-                    )
-                ]
-                if messages:
-                    error_meta = {"error": "; ".join(messages)}
-                    update = {stats_key: error_meta} if stats_key else error_meta
-            file_meta_for_update.update(update)
-            file_meta = file_meta_for_update
-
-            os.makedirs(output_json_path.parent, exist_ok=True)
-            Path(output_json_path).write_text(
-                json.dumps(
-                    (
-                        file_meta
-                        if not relative
-                        else to_relative(file_meta, Path(output_json_path).parent)
-                    ),
-                    indent=2,
-                    ensure_ascii=False,
-                    default=_json_default,
-                )
-            )
-    if output_path:
-        Path(output_path).write_text(
-            json.dumps(
-                (meta if not relative else to_relative(meta, Path(output_path).parent)),
-                indent=2,
-                ensure_ascii=False,
-                default=_json_default,
-            )
+        settings = MetaFileSettings(
+            stats_key,
+            file_key,
+            each_file_output_path or default_meta_path,
+            replace_if_exists,
+            update_if_exists,
+            relative,
         )
+        for file, meta in selected:
+            save_item_metadata(file, meta, errors, settings)
+    if output_path:
+        write_json(output_path, [meta for _, meta in selected], relative)
         logger.info(f"Save {output_path}")
 
 
@@ -217,22 +149,12 @@ def dataset_stats(
     print_stats: bool = True,
 ):
 
-    stat_dict = {}
-    stat_dict["errors"] = {}
+    stat_dict: dict[str, Any] = {"errors": {}}
     failed_output_data = {}
-
-    if stage_stats:
-        for stage_name, stat_func in stage_stats.items():
-            stat_func(stages, stage_name, stat_dict)
-
+    for stage_name, stat_func in (stage_stats or {}).items():
+        stat_func(stages, stage_name, stat_dict)
     for stage_name, (_, _, errors) in stages.items():
-        grouped = {}
-        for error in errors.values():
-            entry = grouped.setdefault(
-                error.message, {"count": 0, "example": error.path}
-            )
-            entry["count"] += 1
-        stat_dict["errors"][stage_name] = grouped
+        stat_dict["errors"][stage_name] = _error_statistics(errors)
         failed_output_data[stage_name] = {
             key: {
                 "item_id": error.item_id,
@@ -242,50 +164,37 @@ def dataset_stats(
             }
             for key, error in errors.items()
         }
-
-    if failed_output:
-        Path(failed_output).write_text(
-            json.dumps(
-                (
-                    failed_output_data
-                    if not relative
-                    else to_relative(
-                        failed_output_data,
-                        Path(failed_output).parent,
-                    )
-                ),
-                indent=2,
-                ensure_ascii=False,
-                default=_json_default,
-            )
-        )
-        if stdout:
-            stdout(f"Save {failed_output}")
-
-    if stat_output:
-
-        Path(stat_output).write_text(
-            json.dumps(
-                (
-                    stat_dict
-                    if not relative
-                    else to_relative(stat_dict, Path(stat_output).parent)
-                ),
-                indent=2,
-                ensure_ascii=False,
-                default=_json_default,
-            )
-        )
-
+    _save_dataset_outputs(
+        failed_output, stat_output, failed_output_data, stat_dict, relative, stdout
+    )
     if stdout:
         if print_stats:
             stdout(
                 json.dumps(
-                    stat_dict, indent=2, ensure_ascii=False, default=_json_default
+                    stat_dict, indent=2, ensure_ascii=False, default=json_default
                 )
             )
         stdout(f"Save {stat_output}")
     return stat_dict
+
+
+def _error_statistics(errors: ErrorsDict) -> dict[str, Any]:
+    grouped: dict[str, Any] = {}
+    for error in errors.values():
+        entry = grouped.setdefault(error.message, {"count": 0, "example": error.path})
+        entry["count"] += 1
+    return grouped
+
+
+def _save_dataset_outputs(
+    failed_output, stat_output, failed_data, statistics, relative, stdout
+):
+    if failed_output:
+        write_json(failed_output, failed_data, relative)
+        if stdout:
+            stdout(f"Save {failed_output}")
+    if stat_output:
+        write_json(stat_output, statistics, relative)
 
 
 def stage_stats(

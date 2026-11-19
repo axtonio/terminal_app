@@ -1,6 +1,8 @@
+from importlib import import_module
+
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from seleniumwire import webdriver
+from selenium.webdriver.chrome.webdriver import WebDriver
 
 
 def open_driver(
@@ -9,7 +11,7 @@ def open_driver(
     width: int = 1920,
     height: int = 1080,
     chromedriver_path: str = "/usr/bin/chromedriver",
-) -> webdriver.Chrome:
+) -> WebDriver:
 
     proxy_auth = f"http://{proxy}"
 
@@ -36,6 +38,8 @@ def open_driver(
 
     service = Service(chromedriver_path)
 
+    # Keep the optional Selenium Wire dependency out of plain HTTP/SSH imports.
+    webdriver = import_module("seleniumwire.webdriver")
     driver = webdriver.Chrome(
         service=service,
         options=chrome_options,

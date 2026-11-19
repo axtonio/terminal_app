@@ -1,29 +1,26 @@
-from __future__ import annotations
-
 import io
 import logging
 import os
 import sys
-from distutils.util import strtobool
+from copy import copy
 from inspect import getfile
 from logging import FileHandler, Logger
 from pathlib import Path
-from typing import Any, Callable, Literal, overload
+from typing import Any, Callable, Literal, TextIO, cast, overload
 
 DEFAULT_FORMATTER = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
 DEFAULT_STREAM = logging.StreamHandler()
 DEFAULT_STREAM.setFormatter(DEFAULT_FORMATTER)
 
 
-def _suffix():
+def _suffix() -> str:
     return os.environ.get("LOGGING_SUFFIX", "terminal_app")
 
 
 class TerminalAppHandler(FileHandler):
-
     def __init__(
         self,
-        terminal_app_stream: io.TextIOWrapper | None,
+        terminal_app_stream: TextIO | None,
         filename: str | os.PathLike[str],
         mode: str = "a",
         encoding: str | None = None,
@@ -31,49 +28,111 @@ class TerminalAppHandler(FileHandler):
         errors: str | None = None,
     ) -> None:
         super().__init__(filename, mode, encoding, delay, errors)
-        self.terminal_app_stream: io.TextIOWrapper = terminal_app_stream if terminal_app_stream is not None else sys.stdout  # type: ignore
+        self.terminal_app_stream = (
+            terminal_app_stream if terminal_app_stream is not None else sys.stdout
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
         stream = self.stream
-        line = self.get_line(self.baseFilename)
-        message = record.msg
-
-        record.msg = line
-        self.stream = self.terminal_app_stream
+        reference = copy(record)
+        reference.msg = self.get_line(self.baseFilename)
+        reference.args = ()
+        try:
+            self.stream = cast(io.TextIOWrapper, self.terminal_app_stream)
+            super().emit(reference)
+        finally:
+            self.stream = stream
         super().emit(record)
-
-        self.stream = stream
-        record.msg = message
-        super().emit(record)
-        return None
-
-    def close(self) -> None:
-
-        return super().close()
 
     @staticmethod
     def get_line(logger: Logger | str | Path) -> str:
+        path: str | Path | None = logger if not isinstance(logger, Logger) else None
         if isinstance(logger, Logger):
             for handler in logger.handlers:
                 if isinstance(handler, FileHandler):
-                    logging_path = handler.baseFilename
-        else:
-            logging_path = logger
-
+                    path = handler.baseFilename
+        if path is None:
+            return ""
         try:
-            with open(logging_path, "r") as f:
-                return f"{logging_path}, line {len(f.readlines()) + 1}"
-
-        except Exception:
-
+            with open(path) as source:
+                return f"{path}, line {len(source.readlines()) + 1}"
+        except OSError:
             return ""
 
 
 class TerminalAppLogger(Logger):
+    def _log(
+        self,
+        level,
+        msg,
+        args,
+        exc_info=None,
+        extra=None,
+        stack_info=False,
+        stacklevel=1,
+    ) -> None:
+        value = os.environ.get("TERMINAL_APP_LOGGER", "0").lower()
+        if value in ("y", "yes", "t", "true", "on", "1"):
+            super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel)
+        elif value not in ("n", "no", "f", "false", "off", "0"):
+            raise ValueError(f"invalid truth value {value!r}")
 
-    def _log(self, *args, **kwargs) -> None:
-        if strtobool(os.environ.get("TERMINAL_APP_LOGGER", "0")):
-            return super()._log(*args, **kwargs)
+
+def _clear_handlers(logger: Logger) -> None:
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+
+
+def _select_logger(
+    name: str | None, library: bool, level: int | str, if_exist: str
+) -> tuple[Logger, bool]:
+    if name in logging.Logger.manager.loggerDict or library:
+        TERMINAL_APP_LOGGER.info("Change %s logger", name)
+        logger = logging.getLogger(name)
+        _clear_handlers(logger)
+        return logger, False
+    if name is None:
+        return TerminalAppLogger(_suffix(), level), False
+    naming = f"{_suffix()}.{name}"
+    if naming in logging.Logger.manager.loggerDict:
+        if if_exist == "return":
+            return logging.getLogger(naming), True
+        if if_exist == "clear":
+            _clear_handlers(logging.getLogger(naming))
+            logging.Logger.manager.loggerDict.pop(naming)
+    assert (
+        naming not in logging.Logger.manager.loggerDict
+    ), "The same name of the loggers"
+    return logging.getLogger(naming), False
+
+
+def _startup_count(lines: list[str]) -> int:
+    for line in reversed(lines):
+        if line.startswith("STARTUP"):
+            try:
+                return int(line[-2]) + 1
+            except ValueError:
+                continue
+    return 1
+
+
+def _file_handler(
+    path: Path, terminal_app_handler: bool, stream: TextIO | None
+) -> FileHandler:
+    mode = os.environ.get("LOGGING_FILE_MODE", "w")
+    handler = (
+        TerminalAppHandler(stream, path, mode=mode)
+        if terminal_app_handler
+        else FileHandler(path, mode=mode)
+    )
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(DEFAULT_FORMATTER)
+    if mode.lower() != "w":
+        with path.open(f"{mode}+") as destination:
+            destination.seek(0)
+            count = _startup_count(destination.readlines())
+            destination.write(f"STARTUP {count}\n")
+    return handler
 
 
 @overload
@@ -82,11 +141,10 @@ def register_logger(
     *,
     name: str | None = None,
     library: bool = False,
-    level: logging._Level = logging.DEBUG,
+    level: int | str = logging.DEBUG,
     without_handlers: bool = False,
     if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger:
-    pass
+) -> Logger: ...
 
 
 @overload
@@ -95,13 +153,12 @@ def register_logger(
     *,
     name: str | None = None,
     library: bool = False,
-    level: logging._Level = logging.DEBUG,
+    level: int | str = logging.DEBUG,
     terminal_app_handler: Literal[True],
     terminal_app_stream: io.TextIOWrapper | None = None,
     without_handlers: bool = False,
     if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger:
-    pass
+) -> Logger: ...
 
 
 @overload
@@ -109,103 +166,40 @@ def register_logger(
     *,
     name: str,
     library: bool = False,
-    level: logging._Level = logging.DEBUG,
+    level: int | str = logging.DEBUG,
     without_handlers: bool = False,
     if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger:
-    pass
+) -> Logger: ...
 
 
 @overload
-def register_logger() -> TerminalAppLogger:
-    pass
+def register_logger() -> TerminalAppLogger: ...
 
 
 def register_logger(
     path: Path | str | None = None,
     name: str | None = None,
     library: bool = False,
-    level: logging._Level = logging.DEBUG,
+    level: int | str = logging.DEBUG,
     terminal_app_handler: bool = False,
-    terminal_app_stream: io.TextIOWrapper | None = None,
+    terminal_app_stream: TextIO | None = None,
     without_handlers: bool = False,
     if_exist: Literal["error", "clear", "return"] = "error",
 ) -> Logger:
-
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-
-    if path is not None:
-
-        file_path = RootLogging.root_path / path if isinstance(path, str) else path
-
-    name = name if name is not None else file_path.stem if path is not None else None
-
-    if name in logging.Logger.manager.loggerDict.keys() or library:
-        TERMINAL_APP_LOGGER.info(f"Change {name} logger")
-        logger = logging.getLogger(name)
-        for handler in logger.handlers:
-            logger.removeHandler(handler)
-    else:
-        if name is not None:
-            naming = f"{_suffix()}.{name}"
-            if naming in logging.Logger.manager.loggerDict.keys():
-                if if_exist == "clear":
-                    logger = logging.getLogger(naming)
-                    for handler in logger.handlers:
-                        logger.removeHandler(handler)
-
-                    logging.Logger.manager.loggerDict.pop(naming)
-                if if_exist == "return":
-                    return logging.getLogger(naming)
-
-            assert (
-                naming not in logging.Logger.manager.loggerDict.keys()
-            ), "The same name of the loggers"
-            logger = logging.getLogger(naming)
-        else:
-            logger = TerminalAppLogger(_suffix(), level)
-
+    file_path = RootLogging.root_path / path if isinstance(path, str) else path
+    if name is None and file_path is not None:
+        name = file_path.stem
+    logger, existing = _select_logger(name, library, level, if_exist)
+    if existing:
+        return logger
     if not without_handlers:
-
-        if path is not None:
-            mode = os.environ.get("LOGGING_FILE_MODE", "w")
-            if not terminal_app_handler:
-                file_handler = logging.FileHandler(file_path.as_posix(), mode=mode)
-            else:
-                file_handler = TerminalAppHandler(
-                    terminal_app_stream,
-                    file_path.as_posix(),
-                    mode=mode,
-                )
-
-            file_handler.setLevel(logging.DEBUG)
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-
-            if mode.lower() != "w":
-
-                with open(file_path, f"{mode}+") as f:
-                    f.seek(0)
-                    lines = f.readlines()
-                    lines.reverse()
-
-                    count = 1
-                    message = "STARTUP {}\n"
-                    for line in lines:
-                        if line.startswith("STARTUP"):
-                            try:
-                                count = int(line[-2]) + 1
-                                break
-                            except Exception:
-                                continue
-
-                    f.write(message.format(count))
-
-        else:
-            logger.addHandler(DEFAULT_STREAM)
-
+        handler = (
+            _file_handler(file_path, terminal_app_handler, terminal_app_stream)
+            if file_path is not None
+            else DEFAULT_STREAM
+        )
+        logger.addHandler(handler)
     logger.setLevel(level)
-
     return logger
 
 
@@ -218,29 +212,22 @@ class LoggingMeta(type):
 
     @property
     def root_path(cls) -> Path:
-        create_folder = False
-        root_path = LoggingMeta.__root_path__()
-        create_folder = not root_path.exists()
-        create_folder = not root_path.is_dir()
-        if create_folder:
-            os.mkdir(root_path)
-
-        return root_path
+        root = LoggingMeta.__root_path__()
+        if not root.is_dir():
+            root.mkdir()
+        return root
 
     def __new__(
         mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any]
-    ) -> type:
-        cls = super().__new__(mcls, name, bases, namespace)
-
-        if "RootLogging" in [base.__name__ for base in bases]:
-            if os.getenv(f"{name}_LOGGING"):
-
-                cls.root_logger = register_logger(cls.root_path / f"{name}.log")
-
-        if namespace.get("LOGGING", None) is True:
+    ) -> "LoggingMeta":
+        cls = cast("LoggingMeta", super().__new__(mcls, name, bases, namespace))
+        if "RootLogging" in [base.__name__ for base in bases] and os.getenv(
+            f"{name}_LOGGING"
+        ):
+            cls.root_logger = register_logger(cls.root_path / f"{name}.log")
+        if namespace.get("LOGGING") is True:
             file = Path(getfile(cls))
             cls.logger = register_logger(file.parent / (file.stem + ".log"), name=name)
-
         return cls
 
 

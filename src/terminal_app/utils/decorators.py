@@ -93,7 +93,7 @@ def safety_call(
 
             return safety_call(fn, params=kwargs)
 
-        setattr(wrapper, "__signature__", inspect.signature(fn))
+        wrapper.__dict__["__signature__"] = inspect.signature(fn)
         return wrapper
 
     args, kwargs = get_params(fn, params)
@@ -123,7 +123,7 @@ def set_params(
 
             return func(*arguments, **kw)
 
-        setattr(wrapper, "__signature__", inspect.signature(func))
+        wrapper.__dict__["__signature__"] = inspect.signature(func)
         return wrapper
 
     return decorator

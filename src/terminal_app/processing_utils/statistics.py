@@ -3,7 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from terminal_app.utils import filter_by_regex, is_regex_pattern
+from terminal_app.utils.utils import filter_by_regex, is_regex_pattern
 
 STATISTICS = (
     "mean",
@@ -25,7 +25,7 @@ def find_closest_path(values, target_value, paths):
 
 
 def _field_configs(data, field_configs):
-    result = {}
+    result: dict[str, dict[str, Any]] = {}
     fields = set().union(*(row.keys() for _, row in data)) if data else set()
     for field, config in field_configs.items():
         if is_regex_pattern(field):
@@ -39,24 +39,30 @@ def _field_configs(data, field_configs):
 def _numeric(items, store_examples):
     values = [float(value) for _, value in items]
     paths = [path for path, _ in items]
-    result = {name: {"value": None, "example": None} for name in STATISTICS}
+    result: dict[str, dict[str, Any]] = {
+        name: {"value": None, "example": None} for name in STATISTICS
+    }
     if not values:
         return result
     calculated = {
-        "mean": np.mean(values),
-        "median": np.median(values),
+        "mean": float(np.mean(values)),
+        "median": float(np.median(values)),
         "min": min(values),
         "max": max(values),
-        "std": np.std(values),
-        "quantile_25": np.quantile(values, 0.25),
-        "quantile_75": np.quantile(values, 0.75),
-        "quantile_90": np.quantile(values, 0.90),
+        "std": float(np.std(values)),
+        "quantile_25": float(np.quantile(values, 0.25)),
+        "quantile_75": float(np.quantile(values, 0.75)),
+        "quantile_90": float(np.quantile(values, 0.90)),
     }
     for name, value in calculated.items():
         result[name]["value"] = float(value) if math.isfinite(value) else None
         if store_examples and name != "std" and result[name]["value"] is not None:
             result[name]["example"] = find_closest_path(values, float(value), paths)
     return result
+
+
+def _first_example(items, enabled):
+    return (items[0][0] or None) if enabled and items else None
 
 
 def _ratio(items, group_count, config):
@@ -72,9 +78,25 @@ def _ratio(items, group_count, config):
     return {
         "count": len(positive),
         "ratio": len(positive) / count if count and items else None,
-        "positive_example": (positive[0][0] or None) if examples and positive else None,
-        "negative_example": (negative[0][0] or None) if examples and negative else None,
+        "positive_example": _first_example(positive, examples),
+        "negative_example": _first_example(negative, examples),
     }
+
+
+def _observed_items(data, field):
+    items = []
+    for path, row in data:
+        value = row.get(field)
+        if value is not None and math.isfinite(value):
+            items.append((path, value))
+    return items
+
+
+def _field_kind(field, config):
+    kind = config.get("kind", "ratio" if field.startswith("is_") else "statistics")
+    if kind not in ("statistics", "ratio"):
+        raise ValueError(f"Unknown field kind for {field}: {kind}")
+    return kind
 
 
 def calculate_stats(
@@ -93,14 +115,8 @@ def calculate_stats(
     ]
     result = {"statistics": {}, "ratios": {}, "summary": {"count": len(data)}}
     for field, config in _field_configs(data, field_configs).items():
-        kind = config.get("kind", "ratio" if field.startswith("is_") else "statistics")
-        if kind not in ("statistics", "ratio"):
-            raise ValueError(f"Unknown field kind for {field}: {kind}")
-        items = []
-        for path, row in data:
-            value = row.get(field)
-            if value is not None and math.isfinite(value):
-                items.append((path, value))
+        kind = _field_kind(field, config)
+        items = _observed_items(data, field)
         if kind == "ratio":
             result["ratios"][field] = _ratio(items, len(data), config)
         else:
