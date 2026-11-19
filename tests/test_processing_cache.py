@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from terminal_app.processing_utils.core import SequenceStages, run_stages
 from terminal_app.processing_utils.default_stage import DefaultStage, StageConfig
@@ -80,3 +83,29 @@ def test_cached_global_failure_cannot_restore_stale_sibling_sections(tmp_path: P
     ]
     assert result[0][0].meta["sibling_statistics"] == {"value": 8}
     assert result[0][0].meta["sample_statistics"]["error"] == "failed"
+
+
+def crash(file):
+    os._exit(1)
+
+
+@pytest.mark.parametrize("safety", [False, True])
+def test_worker_death_cannot_restore_seeded_cached_score(tmp_path: Path, safety):
+    source = tmp_path / "input"
+    source.write_text("mesh")
+    node = build_stage(False)
+    node.config.worker_wrapper = crash
+    node.config.safety = safety
+    item = StageItem(
+        "id",
+        source,
+        {
+            "sample_statistics": {"pd_file": "old", "value": 1},
+            "sibling_statistics": {"value": 8},
+        },
+    )
+    result = run_stages([node], filtered_files=[item], use_meta=[])["metric"]
+    assert result[0][0].meta["sample_statistics"] == {}
+    assert result[0][0].meta["sibling_statistics"] == {"value": 8}
+    assert not result[1]
+    assert len(result[2]) == 1

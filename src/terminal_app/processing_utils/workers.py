@@ -120,6 +120,7 @@ def process_files(
     postprocessing_func=None,
     task_timeout: int = 300,
     process_timeout: int = 120,
+    prepare_item=None,
 ):
     if safety and device == "cuda":
         raise ValueError("Safety mode works only on CPU")
@@ -139,6 +140,14 @@ def process_files(
             for path in annotations_to_path_list(annotations, read_json=read_json)
         ]
     inputs = normalize_items(filtered_files)
+    if prepare_item is not None:
+        prepared = []
+        for item in inputs:
+            changed = prepare_item(deepcopy(item))
+            if not isinstance(changed, StageItem) or changed.item_id != item.item_id:
+                raise ValueError("prepare_item must preserve its StageItem.item_id")
+            prepared.append(changed)
+        inputs = prepared
     if not inputs:
         result = [], [], {}
         return postprocessing_func(*result) if postprocessing_func else result

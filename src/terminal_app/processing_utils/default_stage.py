@@ -18,6 +18,7 @@ from .stage_utils import (
     process_failed_filter,
     process_meta_file,
 )
+from .types import StageItem
 from .utils import (
     FilesWithMeta,
 )
@@ -109,6 +110,15 @@ def _process_file_worker_wrapper(
     return (file, meta, failed_filter, passed)
 
 
+def _prepare_item(item: StageItem, statistics_key: str, file_key: str) -> StageItem:
+    # Clear owned cached data in the parent as well: a killed worker cannot
+    # return its cleanup, and fallback must never mistake yesterday's score
+    # for the current attempt's result. Sibling metadata remains untouched.
+    item.meta[statistics_key] = {}
+    item.meta[file_key] = str(item.path)
+    return item
+
+
 def _process_files(
     use_meta: bool,
     meta_suffix: str,
@@ -133,6 +143,9 @@ def _process_files(
             stats_key=statistics_key,
         ),
         desc=description,
+        prepare_item=partial(
+            _prepare_item, statistics_key=statistics_key, file_key=file_key
+        ),
         error_stdout=logger.error,
         start_method=start_method,
         task_timeout=task_timeout,
