@@ -137,10 +137,15 @@ and their descendants. Unknown paths fail before execution. Boolean policies
 remain available for older callers. Cache selection is resolved by `run_stages`,
 not by the truthiness of the list. A leaf saves only its own statistics section
 and associated file field, preserving newer sibling sections already on disk.
+Saving a new section through a metadata symlink creates a local file and leaves
+the source unchanged. Cached paths are resolved relative to the source metadata.
+Callbacks with nothing to save leave existing links untouched.
 
 Worker exceptions, task timeouts and missing replies become item errors in both
 safety modes. `process_timeout` also limits a non-isolated task; a dead worker's
 outstanding items remain in `all_files` with their incoming metadata.
+Timeout cleanup stops library-managed workers. Worker functions remain responsible
+for external subprocesses they launch.
 
 ## Structured statistics
 
@@ -163,10 +168,9 @@ Numeric summaries contain `{value, example}` for mean, median, min, max, standar
 deviation and 25/75/90 percentiles. Representative examples are the nearest real
 observation; standard deviation has no example. Zero values remain visible.
 Ratio fields contain positive `count`, `ratio`, `positive_example` and
-`negative_example`. Missing flags never become negative examples. The default
-ratio denominator is the full selection; `denominator="observed"` explicitly
-selects another policy. `summary.count` is the selection size. Empty selections
-and missing measurements use `null` values/examples rather than NaN.
+`negative_example`. Missing flags never become negative examples. The
+ratio denominator is the full selection. `summary.count` is the selection size.
+Empty selections and missing measurements use `null` values/examples rather than NaN.
 
 Existing field patterns and `store_examples` remain supported. Callers should
 specify `kind`; configurations without it retain the legacy `is_` convention.

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Sequence
 
 from .types import ErrorsDict, FilesWithMeta, PipesResult, StageResult
 
@@ -15,7 +16,7 @@ class Callback(ABC):
 
 
 class Stage(ABC):
-    callbacks: list[Callback] = []
+    callbacks: Sequence[Callback] = ()
     _use_meta: bool | None = None
 
     @property

@@ -1,8 +1,5 @@
 from importlib import import_module
-
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.webdriver import WebDriver
+from typing import Any
 
 
 def open_driver(
@@ -11,7 +8,7 @@ def open_driver(
     width: int = 1920,
     height: int = 1080,
     chromedriver_path: str = "/usr/bin/chromedriver",
-) -> WebDriver:
+) -> Any:
 
     proxy_auth = f"http://{proxy}"
 
@@ -23,7 +20,7 @@ def open_driver(
         }
     }
 
-    chrome_options = Options()
+    chrome_options = import_module("selenium.webdriver.chrome.options").Options()
 
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option("useAutomationExtension", False)
@@ -36,9 +33,11 @@ def open_driver(
             f"--window-size={width},{height}"
         )  # Для заданного размера
 
-    service = Service(chromedriver_path)
+    service = import_module("selenium.webdriver.chrome.service").Service(
+        chromedriver_path
+    )
 
-    # Keep the optional Selenium Wire dependency out of plain HTTP/SSH imports.
+    # Load browser dependencies only when a browser is requested.
     webdriver = import_module("seleniumwire.webdriver")
     driver = webdriver.Chrome(
         service=service,

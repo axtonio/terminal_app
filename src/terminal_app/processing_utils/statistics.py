@@ -70,14 +70,10 @@ def _ratio(items, group_count, config):
         raise ValueError("Ratio fields must contain booleans or 0/1 values")
     positive = [(path, value) for path, value in items if bool(value)]
     negative = [(path, value) for path, value in items if not bool(value)]
-    denominator = config.get("denominator", "group")
-    if denominator not in ("group", "observed"):
-        raise ValueError("Ratio denominator must be 'group' or 'observed'")
-    count = group_count if denominator == "group" else len(items)
     examples = config.get("store_examples", False)
     return {
         "count": len(positive),
-        "ratio": len(positive) / count if count and items else None,
+        "ratio": len(positive) / group_count if group_count and items else None,
         "positive_example": _first_example(positive, examples),
         "negative_example": _first_example(negative, examples),
     }
@@ -106,8 +102,7 @@ def calculate_stats(
 
     Each field declares ``kind='statistics'`` or ``kind='ratio'``. Legacy
     configurations without a kind retain the old ``is_`` convention. Ratio
-    denominators default to the complete group, including missing observations;
-    use ``denominator='observed'`` explicitly for another domain policy. Missing
+    denominators use the complete group, including missing observations. Missing
     observations are never selected as negative examples.
     """
     data = [

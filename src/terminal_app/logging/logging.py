@@ -54,7 +54,7 @@ class TerminalAppHandler(FileHandler):
         if path is None:
             return ""
         try:
-            with open(path) as source:
+            with open(path, "rb") as source:
                 return f"{path}, line {len(source.readlines()) + 1}"
         except OSError:
             return ""
@@ -136,44 +136,20 @@ def _file_handler(
 
 
 @overload
-def register_logger(
-    path: Path | str,
-    *,
-    name: str | None = None,
-    library: bool = False,
-    level: int | str = logging.DEBUG,
-    without_handlers: bool = False,
-    if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger: ...
-
-
-@overload
-def register_logger(
-    path: Path | str,
-    *,
-    name: str | None = None,
-    library: bool = False,
-    level: int | str = logging.DEBUG,
-    terminal_app_handler: Literal[True],
-    terminal_app_stream: io.TextIOWrapper | None = None,
-    without_handlers: bool = False,
-    if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger: ...
-
-
-@overload
-def register_logger(
-    *,
-    name: str,
-    library: bool = False,
-    level: int | str = logging.DEBUG,
-    without_handlers: bool = False,
-    if_exist: Literal["error", "clear", "return"] = "error",
-) -> Logger: ...
-
-
-@overload
 def register_logger() -> TerminalAppLogger: ...
+
+
+@overload
+def register_logger(
+    path: Path | str | None = None,
+    name: str | None = None,
+    library: bool = False,
+    level: int | str = logging.DEBUG,
+    terminal_app_handler: bool = False,
+    terminal_app_stream: TextIO | None = None,
+    without_handlers: bool = False,
+    if_exist: Literal["error", "clear", "return"] = "error",
+) -> Logger: ...
 
 
 def register_logger(

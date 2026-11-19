@@ -1,4 +1,3 @@
-import asyncio
 import inspect
 from collections.abc import Mapping
 from functools import wraps
@@ -98,10 +97,7 @@ def safety_call(
 
     args, kwargs = get_params(fn, params)
 
-    if asyncio.iscoroutinefunction(fn):
-        return fn(*args, **kwargs)
-    else:
-        return fn(*args, **kwargs)
+    return fn(*args, **kwargs)
 
 
 def set_params(

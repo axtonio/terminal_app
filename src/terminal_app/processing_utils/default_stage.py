@@ -124,42 +124,6 @@ def _prepare_item(item: StageItem, statistics_key: str, file_key: str) -> StageI
     return item
 
 
-def _process_files(
-    use_meta: bool,
-    meta_suffix: str,
-    file_key: str,
-    statistics_key: str,
-    worker_wrapper: WorkerFn,
-    start_method: _StartMethod,
-    task_timeout: int,
-    process_timeout: int,
-    safety: bool,
-    description: str,
-    logging: bool,
-):
-    return partial(
-        process_files,
-        filter_one=partial(
-            _process_file_worker_wrapper,
-            function=worker_wrapper,
-            use_meta=use_meta,
-            meta_suffix=meta_suffix,
-            file_key=file_key,
-            stats_key=statistics_key,
-        ),
-        desc=description,
-        prepare_item=partial(
-            _prepare_item, statistics_key=statistics_key, file_key=file_key
-        ),
-        error_stdout=logger.error,
-        start_method=start_method,
-        task_timeout=task_timeout,
-        process_timeout=process_timeout,
-        safety=safety,
-        logging=logging,
-    )
-
-
 @dataclass(slots=True)
 class StageConfig:
     name: str
@@ -207,21 +171,29 @@ class DefaultStage(Stage):
         )
         if not isinstance(policy, bool):
             raise ValueError("A stage-path cache policy must be resolved by run_stages")
-        return partial(
-            _process_files(
+        return process_files(
+            filtered_files,
+            filter_one=partial(
+                _process_file_worker_wrapper,
+                function=self.config.worker_wrapper,
                 use_meta=policy,
                 meta_suffix=self.config.processing.meta_suffix,
                 file_key=self.config.file_key,
-                statistics_key=self.config.statistics_key,
-                worker_wrapper=self.config.worker_wrapper,
-                start_method=self.config.start_method,
-                task_timeout=self.config.task_timeout,
-                process_timeout=self.config.process_timeout,
-                safety=self.config.safety,
-                description=self.config.description,
-                logging=self.config.logging,
+                stats_key=self.config.statistics_key,
             ),
+            prepare_item=partial(
+                _prepare_item,
+                statistics_key=self.config.statistics_key,
+                file_key=self.config.file_key,
+            ),
+            desc=self.config.description,
+            error_stdout=logger.error,
+            start_method=self.config.start_method,
+            task_timeout=self.config.task_timeout,
+            process_timeout=self.config.process_timeout,
+            safety=self.config.safety,
+            logging=self.config.logging,
             annotations=self.config.processing.annotations,
             max_workers=self.config.processing.max_workers,
             override_files=self.config.processing.override_files,
-        )(filtered_files)
+        )

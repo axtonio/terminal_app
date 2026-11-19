@@ -109,6 +109,11 @@ def process_files(
     process_timeout: int = 120,
     prepare_item=None,
 ):
+    """Process every input with a result or an item error.
+
+    Timeouts stop the direct worker or isolated task process. Subprocesses
+    launched by the supplied function remain that function's responsibility.
+    """
     _validate_options(safety, device, max_workers, process_timeout, task_timeout)
     inputs = _prepare_inputs(
         _select_inputs(filtered_files, override_files, annotations, read_json),

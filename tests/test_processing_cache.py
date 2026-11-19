@@ -6,7 +6,10 @@ import pytest
 
 from terminal_app.processing_utils.core import SequenceStages, run_stages
 from terminal_app.processing_utils.default_stage import DefaultStage, StageConfig
-from terminal_app.processing_utils.stage_utils import ProcessingConfig
+from terminal_app.processing_utils.stage_utils import (
+    ProcessingConfig,
+    SaveMetaCallbackConfig,
+)
 from terminal_app.processing_utils.types import StageItem
 
 
@@ -14,15 +17,15 @@ def compute(file):
     return {"value": 9}, None, True
 
 
-def build_stage(use_meta):
+def build_stage(use_meta, output=None):
     return DefaultStage(
         StageConfig(
             name="metric",
             file_key="sample_file",
             statistics_key="sample_statistics",
-            processing=ProcessingConfig(None, None, 1, use_meta, "_meta.json", None),
+            processing=ProcessingConfig(None, output, 1, use_meta, "_meta.json", None),
             dataset_stats_callback=None,
-            save_meta_callback=None,
+            save_meta_callback=SaveMetaCallbackConfig(True, False) if output else None,
             save_pickle_callback=None,
             worker_wrapper=compute,
             task_timeout=1,
@@ -109,3 +112,72 @@ def test_worker_death_cannot_restore_seeded_cached_score(tmp_path: Path, safety)
     assert result[0][0].meta["sibling_statistics"] == {"value": 8}
     assert not result[1]
     assert len(result[2]) == 1
+
+
+@pytest.mark.parametrize("safety", [False, True])
+def test_worker_death_is_saved_with_owned_file_and_sibling_metadata(tmp_path, safety):
+    source = tmp_path / "input.stl"
+    source.write_text("mesh")
+    target = tmp_path / "input_meta.json"
+    target.write_text(json.dumps({"sibling_statistics": {"value": 3}}))
+    node = build_stage(False, tmp_path)
+    node.config.worker_wrapper = crash
+    node.config.safety = safety
+    result = run_stages(
+        [node], filtered_files=[StageItem("id", source, {})], use_meta=False
+    )["metric"]
+    saved = json.loads(target.read_text())
+    assert saved["sample_statistics"]["error"] == next(iter(result[2].values())).message
+    assert saved["sample_file"] == "{json_path}/input.stl"
+    assert saved["sibling_statistics"] == {"value": 3}
+
+
+@pytest.mark.parametrize("has_cached_section", [False, True])
+@pytest.mark.parametrize("source_name", ["source", 'source"quoted'])
+def test_symlink_cache_saves_locally_without_changing_source(
+    tmp_path, has_cached_section, source_name
+):
+    source_dir, output = tmp_path / source_name, tmp_path / "output"
+    source_dir.mkdir()
+    output.mkdir()
+    source = source_dir / "original.stl"
+    source.write_text("mesh")
+    preview = source_dir / "preview.png"
+    preview.write_bytes(b"preview")
+    source_meta = source_dir / "original_meta.json"
+    payload = {"sibling_statistics": {"preview": "{json_path}/preview.png", "value": 3}}
+    if has_cached_section:
+        payload["sample_statistics"] = {
+            "value": 1,
+            "preview": "{json_path}/preview.png",
+        }
+    original = json.dumps(payload)
+    source_meta.write_text(original)
+    sample = output / "sample.stl"
+    sample.symlink_to(source)
+    item = StageItem("id", sample, {})
+    node = build_stage(True, output)
+    cached = run_stages([node], filtered_files=[item], use_meta=True)["metric"][0][0]
+    local_meta = output / "sample_meta.json"
+    if has_cached_section:
+        assert Path(cached.meta["sample_statistics"]["preview"]).resolve() == preview
+        saved = json.loads(local_meta.read_text())
+        saved_preview = saved["sample_statistics"]["preview"].replace(
+            "{json_path}", str(output)
+        )
+        assert Path(saved_preview).resolve() == preview
+    values = [cached.meta["sample_statistics"]["value"]] + [
+        run_stages([node], filtered_files=[item], use_meta=policy)["metric"][0][0].meta[
+            "sample_statistics"
+        ]["value"]
+        for policy in (False, True)
+    ]
+    assert values == [1 if has_cached_section else 9, 9, 9]
+    assert not local_meta.is_symlink()
+    saved = json.loads(local_meta.read_text())
+    assert saved["sibling_statistics"]["value"] == 3
+    saved_preview = saved["sibling_statistics"]["preview"].replace(
+        "{json_path}", str(output)
+    )
+    assert Path(saved_preview).resolve() == preview
+    assert source_meta.read_text() == original

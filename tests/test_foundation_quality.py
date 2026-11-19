@@ -2,14 +2,15 @@ import io
 import json
 import logging
 import os
-from subprocess import CompletedProcess
+import sys
+from subprocess import CompletedProcess, run
+from textwrap import dedent
 from types import SimpleNamespace
 
 import requests
 
-from terminal_app.env import ProjectConfig
+from terminal_app.env import ProjectConfig, source
 from terminal_app.env import env as project_environment
-from terminal_app.env.source import source
 from terminal_app.env.verify_ssl_certificate import verify_ssl_certs
 from terminal_app.logging.logging import TerminalAppHandler, register_logger
 from terminal_app.utils import utils
@@ -165,3 +166,52 @@ def test_public_formatting_api_and_print_redirection(tmp_path, capsys):
     print("restored")
     assert capsys.readouterr().out == "restored\n"
     assert "value" in path.read_text()
+
+
+def test_terminal_handler_can_append_non_utf8_messages(tmp_path):
+    path = tmp_path / "cp1251.log"
+    terminal = io.StringIO()
+    handler = TerminalAppHandler(terminal, path, encoding="cp1251")
+    try:
+        for message in ("первое сообщение", "второе сообщение"):
+            record = logging.LogRecord(
+                "test", logging.INFO, __file__, 1, message, (), None
+            )
+            handler.emit(record)
+        handler.flush()
+        assert path.read_text(encoding="cp1251").splitlines() == [
+            "первое сообщение",
+            "второе сообщение",
+        ]
+        assert f"{path}, line 2" in terminal.getvalue()
+    finally:
+        handler.close()
+
+
+def test_http_and_ssh_import_without_browser_extras(tmp_path):
+    # A fresh interpreter prevents earlier integration tests from hiding eager imports.
+    code = dedent("""
+        import sys
+        sys.modules.update(selenium=None, seleniumwire=None, flask=None)
+        import requests
+        from terminal_app.request_utils import Curlify, SSHClient, open_driver
+        request = requests.Request("GET", "https://example.invalid/path").prepare()
+        assert Curlify(request).to_curl() == "curl -X GET https://example.invalid/path"
+        assert isinstance(SSHClient, type)
+        assert callable(open_driver)
+    """)
+    result = run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_source_public_export_accepts_explicit_check_modes(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text('{"enabled": true}')
+    assert source(config, check_only=False) == {"enabled": True}
+    assert source(config, check_only=True, raise_if_exception=True) is True

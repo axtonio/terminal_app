@@ -53,6 +53,8 @@ def _legacy_item(value, available: dict[Path, list[str]], require_identity: bool
     ids = available.get(Path(path), [])
     if require_identity and not ids:
         raise ValueError("A changed output path must retain its StageItem.item_id")
+    if require_identity and len(ids) != 1:
+        raise ValueError("An ambiguous output path must retain its StageItem.item_id")
     return StageItem(ids.pop(0) if ids else uuid4().hex, Path(path), meta)
 
 

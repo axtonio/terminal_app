@@ -8,10 +8,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from terminal_app.env.loading import SourceEnv as SourceEnv
+from terminal_app.env.loading import source
 from terminal_app.env.parsing import parse_yaml_file, show_env_info
 from terminal_app.env.runtime import BASE_DIR, CONFIG_FILE, RUN_MODE, WORK_DIR
-from terminal_app.env.source import SourceEnv as SourceEnv
-from terminal_app.env.source import source
 from terminal_app.logging.logging import TERMINAL_APP_LOGGER
 
 

@@ -193,10 +193,22 @@ class AttentionPrint(_PrettyPrinting):
         if mode not in ["w", "a"]:
             print("Incorrect logging mode")
             return
-        if path:
-            with open(path, mode) as destination, redirect_stdout(destination):
-                with AttentionPrint(name=name) as log:
-                    _print_log_payload(log, data, name, desc, pretty_list)
+        if not path:
+            return
+        with (
+            open(path, mode) as destination,
+            redirect_stdout(destination),
+            AttentionPrint(name=name) as log,
+        ):
+            print(f"{name} = ", end="")
+            if pretty_list or isinstance(data, dict):
+                log.pprint(data)
+            else:
+                print(data)
+            if desc:
+                print("\n")
+                for key, value in desc.items():
+                    print(f"{key.upper()} ", value, end="\n")
 
     def __exit__(self, type, value, traceback):
         print("\n" * 2)
@@ -208,21 +220,3 @@ class AttentionPrint(_PrettyPrinting):
         print(self.notice(name, self.cnt))
 
         print("\n")
-
-
-def _print_log_payload(
-    log: AttentionPrint,
-    data: Any,
-    name: str,
-    description: dict[str, str] | None,
-    pretty: bool,
-) -> None:
-    print(f"{name} = ", end="")
-    if pretty or isinstance(data, dict):
-        log.pprint(data)
-    else:
-        print(data)
-    if description:
-        print("\n")
-        for key, value in description.items():
-            print(f"{key.upper()} ", value, end="\n")

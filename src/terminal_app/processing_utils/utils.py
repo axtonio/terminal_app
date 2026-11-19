@@ -119,8 +119,10 @@ def save_meta_callback(
             update_if_exists,
             relative,
         )
-        for file, meta in selected:
-            save_item_metadata(file, meta, errors, settings)
+        for item in selected:
+            file, meta = item
+            item_id = item.item_id if isinstance(item, StageItem) else None
+            save_item_metadata(file, meta, errors, settings, item_id)
     if output_path:
         write_json(output_path, [meta for _, meta in selected], relative)
         logger.info(f"Save {output_path}")

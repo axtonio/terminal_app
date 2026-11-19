@@ -1,12 +1,12 @@
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .core import Callback
+from .base import Callback
+from .metadata_io import read_metadata
+from .types import PipesResult
 from .utils import (
-    PipesResult,
     dataset_stats,
     save_meta_callback,
     save_pickle_callback,
@@ -78,9 +78,17 @@ class DatasetStatsCallback(Callback):
         self.print_stats = print_stats
 
     def __call__(self, stages_result: PipesResult, stage_name: str | None) -> None:
+        stage_stats = {
+            (
+                stage_name
+                if stage_name is not None and name == stage_name.rsplit("/", 1)[-1]
+                else name
+            ): callback
+            for name, callback in self.stage_stats.items()
+        }
         dataset_stats(
             stages_result,
-            stage_stats=self.stage_stats,
+            stage_stats=stage_stats,
             failed_output=self.output / f"{self.prefix}{self.failed_output_name}.json",
             stat_output=self.output / f"{self.prefix}{self.stat_output_name}.json",
             stdout=logger.info,
@@ -218,9 +226,7 @@ def process_meta_file(meta_file: Path, meta: dict[str, Any], stats_key: str):
     failed_filter: str | None = None
     passed: bool = True
 
-    saved_meta: dict = json.loads(
-        meta_file.read_text().replace("{json_path}", meta_file.parent.as_posix())
-    )
+    saved_meta = read_metadata(meta_file)
     failed_filter = saved_meta.get("error", None)
     if failed_filter:
         meta[stats_key] = dict(saved_meta.get(stats_key) or {})

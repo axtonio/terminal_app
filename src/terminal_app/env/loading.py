@@ -111,12 +111,27 @@ def _read_config(path: Path, raise_if_exception: bool) -> tuple[dict[str, Any], 
 def source(
     env_files: str | list[str] | Path | list[Path] = CONFIG_FILE,
     *,
+    check_only: Literal[False] = False,
     raise_if_exception: bool = False,
 ) -> SourceEnv: ...
 
 
 @overload
-def source(env_files: str | Path, *, check_only: Literal[True]) -> bool: ...
+def source(
+    env_files: str | Path = CONFIG_FILE,
+    *,
+    check_only: Literal[True],
+    raise_if_exception: bool = False,
+) -> bool: ...
+
+
+@overload
+def source(
+    env_files: str | list[str] | Path | list[Path] = CONFIG_FILE,
+    *,
+    check_only: bool,
+    raise_if_exception: bool = False,
+) -> SourceEnv | bool: ...
 
 
 def source(

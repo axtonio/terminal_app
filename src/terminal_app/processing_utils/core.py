@@ -1,8 +1,13 @@
 """Public pipeline and worker entry points."""
 
 from .base import Callback, Stage
-from .composites import ParallelStages, SequenceStages, first_successful_path
-from .pipeline import cache_enabled, run_stages
+from .pipeline import (
+    ParallelStages,
+    SequenceStages,
+    cache_enabled,
+    first_successful_path,
+    run_stages,
+)
 from .workers import _worker as _worker
 from .workers import process_files
 
