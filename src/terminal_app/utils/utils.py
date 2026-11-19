@@ -14,7 +14,7 @@ import subprocess
 from collections import UserDict
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar
+from typing import Any, Callable, Literal, Self, Sequence, TypeVar, overload
 
 import tqdm
 from natsort import natsorted, ns
@@ -97,6 +97,16 @@ class AllParams(UserDict[Any, Any]):
             item = self
 
         return super().__setitem__(key, item)
+
+    @overload
+    def __getitem__(self, key: Literal["all_params"]) -> Self: ...
+
+    @overload
+    def __getitem__(self, key: Any) -> Any: ...
+
+    # The override preserves UserDict behavior and carries the narrower overload.
+    def __getitem__(self, key: Any) -> Any:  # noqa: WPS612
+        return super().__getitem__(key)
 
 
 def chunks(array: list[T], size: int) -> list[list[T]]:
