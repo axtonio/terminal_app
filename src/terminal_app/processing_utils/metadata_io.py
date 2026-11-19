@@ -1,4 +1,8 @@
-"""Persist the section owned by a stage without overwriting sibling metadata."""
+"""Persist stage-owned updates while keeping other sections as opaque JSON.
+
+Materializing linked metadata rebases explicit ``{json_path}/`` value references
+to their original directory. Keys and embedded tokens are never rebased.
+"""
 
 import json
 from dataclasses import dataclass
@@ -58,7 +62,27 @@ def _existing_metadata(path: Path, settings: MetaFileSettings) -> dict | None:
         return {}
     if not settings.replace_if_exists and not settings.update_if_exists:
         return None
-    return read_metadata(path) if settings.update_if_exists else {}
+    if not settings.update_if_exists:
+        return {}
+    saved = json.loads(path.read_text())
+    if path.is_symlink() and path.resolve().parent != path.parent.resolve():
+        saved = _rebase_references(
+            saved, to_relative(path.resolve().parent, path.parent)
+        )
+    return saved
+
+
+def _rebase_references(data: Any, root: str) -> Any:
+    # Materializing a link changes the base of explicit path references. Keys
+    # and embedded tokens remain opaque protocol data, even in linked metadata.
+    # Keep references token-based so persistence does not introduce absolute paths.
+    if isinstance(data, dict):
+        return {key: _rebase_references(value, root) for key, value in data.items()}
+    if isinstance(data, list):
+        return [_rebase_references(value, root) for value in data]
+    if isinstance(data, str) and data.startswith("{json_path}/"):
+        return root + data.removeprefix("{json_path}")
+    return data
 
 
 def _owned_metadata(meta: dict, settings: MetaFileSettings) -> dict:
@@ -107,24 +131,29 @@ def save_item_metadata(
     # disk instead of restoring them from the leaf's older metadata snapshot.
     update = _owned_metadata(meta, settings)
     section = update.get(settings.stats_key, {}) if settings.stats_key else update
-    if not section.get("error") and not section.get("warning"):
-        failure = _error_metadata(file, errors, settings.stats_key, item_id)
-        if settings.stats_key and failure:
-            update[settings.stats_key] = {**section, **failure[settings.stats_key]}
-        else:
-            update.update(failure)
+    failure = (
+        {}
+        if section.get("error") or section.get("warning")
+        else _error_metadata(file, errors, settings.stats_key, item_id)
+    )
+    if settings.stats_key and failure:
+        update[settings.stats_key] = {**section, **failure[settings.stats_key]}
+    else:
+        update.update(failure)
     if not update:
         return
-    saved.update(update)
+    # Only the stage-owned update may be made relative. Existing sections of a
+    # regular file are protocol data and must not pass through path conversion.
+    saved.update(to_relative(update, path.parent) if settings.relative else update)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.is_symlink():
-        write_json(path, saved, settings.relative)
+        write_json(path, saved, relative=False)
         return
     # Replace the local link only after its complete replacement is written.
     with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
         replacement = Path(temporary.name)
     try:
-        write_json(replacement, saved, settings.relative)
+        write_json(replacement, saved, relative=False)
         replacement.replace(path)
     finally:
         replacement.unlink(missing_ok=True)
